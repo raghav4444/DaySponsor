@@ -1,18 +1,66 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const configurationError = new Error(
+  'Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Netlify.',
+);
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
-}
+const unavailableResult = Promise.resolve({
+  data: null,
+  error: configurationError,
+});
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
+let unavailableQuery: Record<string, unknown>;
+
+unavailableQuery = new Proxy({}, {
+  get(_target, property) {
+    if (property === 'then') {
+      return unavailableResult.then.bind(unavailableResult);
+    }
+
+    return () => unavailableQuery;
   },
 });
+
+function createUnavailableClient() {
+  return {
+    auth: {
+      getSession: async () => ({
+        data: { session: null },
+        error: configurationError,
+      }),
+      onAuthStateChange: () => ({
+        data: {
+          subscription: {
+            unsubscribe: () => {},
+          },
+        },
+      }),
+      signInWithPassword: async () => ({
+        data: { user: null, session: null },
+        error: configurationError,
+      }),
+      signUp: async () => ({
+        data: { user: null, session: null },
+        error: configurationError,
+      }),
+      signOut: async () => ({ error: configurationError }),
+    },
+    from: () => unavailableQuery,
+  } as unknown as SupabaseClient;
+}
+
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+
+export const supabase = isSupabaseConfigured
+  ? createClient(supabaseUrl!, supabaseAnonKey!, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+    })
+  : createUnavailableClient();
 
 export type Profile = {
   id: string;
