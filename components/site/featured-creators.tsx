@@ -20,7 +20,7 @@ export function FeaturedCreators() {
   };
 
   return (
-    <section id="explore" className="py-24">
+    <section id="explore" className="py-20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex items-end justify-between mb-12">
           <div>

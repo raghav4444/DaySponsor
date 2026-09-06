@@ -1,11 +1,10 @@
 import Link from 'next/link';
 import { ArrowRight, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { categories } from '@/lib/data';
 
 export function FinalCTA() {
   return (
-    <section id="cta" className="py-32 relative overflow-hidden">
+    <section id="cta" className="py-24 relative overflow-hidden">
       <div className="absolute inset-0 grid-bg opacity-40" />
       <div
         className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[400px] rounded-full opacity-10 blur-3xl"
@@ -42,23 +41,6 @@ export function FinalCTA() {
           <Button size="lg" variant="outline" className="rounded-full h-12 px-8 text-base" asChild>
             <Link href="#creators">Create My Day</Link>
           </Button>
-        </div>
-
-        <div className="mt-16">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-            Explore by category
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {categories.map((cat) => (
-              <Link
-                key={cat}
-                href="#explore"
-                className="px-4 py-2 text-sm rounded-full border border-border bg-card hover:bg-secondary hover:border-foreground/20 transition-all"
-              >
-                {cat}
-              </Link>
-            ))}
-          </div>
         </div>
       </div>
     </section>

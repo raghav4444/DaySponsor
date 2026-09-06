@@ -5,23 +5,41 @@ export function Footer() {
   const columns = [
     {
       title: 'Platform',
-      links: ['Explore', 'For Creators', 'For Brands', 'How it works', 'Pricing'],
+      links: [
+        { label: 'Explore', href: '/explore' },
+        { label: 'For Creators', href: '/#creators' },
+        { label: 'For Brands', href: '/#brands' },
+        { label: 'How it works', href: '/#how-it-works' },
+        { label: 'Pricing', href: '/pricing' },
+      ],
     },
     {
       title: 'Company',
-      links: ['About', 'Blog', 'Careers', 'Press', 'Contact'],
+      links: [
+        { label: 'About', href: '/about' },
+        { label: 'Blog', href: '/blog' },
+        { label: 'Careers', href: '/careers' },
+        { label: 'Press', href: '/press' },
+        { label: 'Contact', href: '/contact' },
+      ],
     },
     {
       title: 'Legal',
-      links: ['Terms', 'Privacy', 'Trust & Safety', 'Review Policy', 'Cookie Policy'],
+      links: [
+        { label: 'Terms', href: '/terms' },
+        { label: 'Privacy', href: '/privacy' },
+        { label: 'Trust & Safety', href: '/trust-safety' },
+        { label: 'Review Policy', href: '/review-policy' },
+        { label: 'Cookie Policy', href: '/cookie-policy' },
+      ],
     },
   ];
 
   return (
     <footer className="border-t border-border/50 bg-secondary/20">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16">
-        <div className="grid lg:grid-cols-[1.5fr_1fr_1fr_1fr] gap-10">
-          <div>
+      <div className="mx-auto max-w-7xl px-5 py-12 sm:px-6 sm:py-16 lg:px-8">
+        <div className="grid grid-cols-2 gap-x-8 gap-y-10 lg:grid-cols-[1.5fr_1fr_1fr_1fr] lg:gap-10">
+          <div className="col-span-2 lg:col-span-1">
             <Link href="/" className="flex items-center gap-2 mb-4">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground text-background">
                 <Sparkles className="h-4 w-4" />
@@ -33,10 +51,17 @@ export function Footer() {
               Use their product. Tell the truth. Get paid.
             </p>
             <div className="flex gap-3 mt-6">
-              {[Twitter, Github, Linkedin].map((Icon, i) => (
+              {[
+                { Icon: Twitter, href: 'https://x.com/daysponsor', label: 'DaySponsor on X' },
+                { Icon: Github, href: 'https://github.com/raghav4444/DaySponsor', label: 'DaySponsor on GitHub' },
+                { Icon: Linkedin, href: 'https://www.linkedin.com/company/daysponsor', label: 'DaySponsor on LinkedIn' },
+              ].map(({ Icon, href, label }) => (
                 <Link
-                  key={i}
-                  href="#"
+                  key={label}
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={label}
                   className="flex h-9 w-9 items-center justify-center rounded-lg border border-border hover:bg-secondary transition-colors"
                 >
                   <Icon className="h-4 w-4 text-muted-foreground" />
@@ -46,16 +71,16 @@ export function Footer() {
           </div>
 
           {columns.map((col) => (
-            <div key={col.title}>
+            <div key={col.title} className="col-span-1">
               <h4 className="text-sm font-semibold mb-4">{col.title}</h4>
               <ul className="space-y-3">
                 {col.links.map((link) => (
-                  <li key={link}>
+                  <li key={link.label}>
                     <Link
-                      href="#"
+                      href={link.href}
                       className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      {link}
+                      {link.label}
                     </Link>
                   </li>
                 ))}
@@ -64,11 +89,11 @@ export function Footer() {
           ))}
         </div>
 
-        <div className="mt-12 pt-8 border-t border-border/50 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p className="text-xs text-muted-foreground">
+        <div className="mt-10 flex flex-col items-center justify-between gap-3 border-t border-border/50 pt-6 text-center sm:mt-12 sm:flex-row sm:gap-4 sm:pt-8 sm:text-left">
+          <p className="text-xs leading-relaxed text-muted-foreground">
             © 2026 DaySponsor. All rights reserved.
           </p>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-center text-xs text-muted-foreground">
             <span className="flex h-2 w-2 rounded-full bg-accent animate-pulse-dot" />
             <span>€18,420 paid to creators · 127 days sponsored</span>
           </div>

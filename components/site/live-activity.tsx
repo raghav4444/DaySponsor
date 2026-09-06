@@ -4,7 +4,7 @@ export function LiveActivity() {
   const doubled = [...activityFeed, ...activityFeed];
 
   return (
-    <section className="py-24 overflow-hidden">
+    <section className="py-20 overflow-hidden">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mb-12">
         <div className="text-center">
           <div className="flex items-center justify-center gap-2 mb-3">

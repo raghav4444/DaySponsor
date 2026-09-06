@@ -2,7 +2,7 @@ import { ShieldCheck, Star, Eye } from 'lucide-react';
 
 export function TrustSection() {
   return (
-    <section className="py-24">
+    <section className="py-20">
       <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
         <div className="rounded-3xl border border-border bg-card overflow-hidden">
           <div className="grid md:grid-cols-2">

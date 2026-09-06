@@ -24,7 +24,7 @@ export function HowItWorks() {
   const steps = tab === 'creators' ? creatorSteps : brandSteps;
 
   return (
-    <section id="how-it-works" className="py-24 bg-secondary/20 border-y border-border/50">
+    <section id="how-it-works" className="py-20 bg-secondary/20 border-y border-border/50">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-12">
           <p className="text-sm font-medium text-accent mb-3">How it works</p>

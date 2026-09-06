@@ -2,7 +2,7 @@ import { marketplaceStats } from '@/lib/data';
 
 export function StatsBar() {
   return (
-    <section className="relative py-16 border-y border-border/50 bg-secondary/20">
+    <section className="relative py-12 border-y border-border/50 bg-secondary/20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-4">
           {marketplaceStats.map((stat, i) => (

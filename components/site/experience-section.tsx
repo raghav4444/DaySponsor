@@ -2,7 +2,7 @@ import { Calendar, Clock, Camera, Star, CheckCircle2 } from 'lucide-react';
 
 export function ExperienceSection() {
   return (
-    <section className="py-24 bg-secondary/20 border-y border-border/50">
+    <section className="py-20 bg-secondary/20 border-y border-border/50">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-16">
           <p className="text-sm font-medium text-accent mb-3">The experience</p>

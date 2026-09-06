@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 export function DualCTA() {
   return (
     <>
-      <section id="creators" className="py-24">
+      <section id="creators" className="py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="grid md:grid-cols-2 gap-6">
             <div className="group relative rounded-3xl border border-border bg-card p-10 sm:p-14 overflow-hidden transition-all hover:shadow-xl">
