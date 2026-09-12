@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth-context';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -21,23 +22,29 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
-      toast({
-        title: 'Sign in failed',
-        description: error.message,
-        variant: 'destructive',
-      });
+      toast({ title: 'Sign in failed', description: error.message, variant: 'destructive' });
       setLoading(false);
       return;
     }
 
-    toast({ title: 'Welcome back!', description: 'You are now signed in.' });
-    router.push('/dashboard/creator');
+    // Fetch profile to redirect by role
+    if (data.user) {
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('user_id', data.user.id)
+        .maybeSingle();
+
+      const role = profileData?.role;
+      toast({ title: 'Welcome back!' });
+
+      if (role === 'brand') router.push('/dashboard/brand');
+      else if (role === 'admin') router.push('/dashboard/admin');
+      else router.push('/dashboard/creator');
+    }
   };
 
   return (
@@ -51,9 +58,7 @@ export default function LoginPage() {
 
       <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 shadow-sm">
         <h1 className="text-2xl font-semibold tracking-tight mb-1">Welcome back</h1>
-        <p className="text-sm text-muted-foreground mb-6">
-          Sign in to your DaySponsor account
-        </p>
+        <p className="text-sm text-muted-foreground mb-6">Sign in to your DaySponsor account</p>
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
@@ -88,9 +93,7 @@ export default function LoginPage() {
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Don&apos;t have an account?{' '}
-          <Link href="/signup" className="font-medium text-foreground hover:underline">
-            Sign up
-          </Link>
+          <Link href="/signup" className="font-medium text-foreground hover:underline">Sign up</Link>
         </p>
       </div>
     </div>
