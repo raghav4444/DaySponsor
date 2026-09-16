@@ -1,10 +1,11 @@
 import { ArrowUpRight, Check, Eye, MessageSquareText, ShieldCheck } from 'lucide-react';
+import { Reveal } from '@/components/site/animations/reveal';
 
 export function OpinionSection() {
   return (
     <section aria-labelledby="opinion-heading" className="border-y border-border/50 bg-secondary/20 py-16 sm:py-20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="mb-10 flex flex-col justify-between gap-5 lg:mb-12 lg:flex-row lg:items-end">
+        <Reveal as="div" variant="fade-up" className="mb-10 flex flex-col justify-between gap-5 lg:mb-12 lg:flex-row lg:items-end">
           <div className="max-w-2xl">
             <div className="mb-4 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-accent">
               <ShieldCheck aria-hidden="true" className="h-4 w-4" />
@@ -17,10 +18,10 @@ export function OpinionSection() {
           <p className="max-w-sm text-sm leading-relaxed text-muted-foreground lg:pb-1">
             Brands sponsor access to a real experience. Creators keep the right to say what they actually think.
           </p>
-        </div>
+        </Reveal>
 
         <div className="grid overflow-hidden rounded-2xl border border-border bg-card shadow-sm md:grid-cols-[0.8fr_1.2fr]">
-          <div className="flex flex-col justify-between bg-foreground p-6 text-background sm:p-8 lg:p-10">
+          <Reveal as="div" variant="fade-right" className="flex flex-col justify-between bg-foreground p-6 text-background sm:p-8 lg:p-10">
             <div>
               <div className="mb-10 flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
                 <MessageSquareText aria-hidden="true" className="h-5 w-5" />
@@ -36,9 +37,9 @@ export function OpinionSection() {
               <span className="h-2 w-2 rounded-full bg-accent" />
               No scripted verdicts
             </div>
-          </div>
+          </Reveal>
 
-          <dl className="divide-y divide-border">
+          <Reveal as="dl" variant="fade-left" stagger={0.1} className="divide-y divide-border">
             <OpinionPrinciple
               icon={MessageSquareText}
               title="The creator keeps their own voice"
@@ -52,9 +53,9 @@ export function OpinionSection() {
             <OpinionPrinciple
               icon={Check}
               title="The activity sets the expectation"
-              description="The day and slot define what the brand is sponsoring. Documentation follows the actual use, not a predetermined verdict."
+              description="The day and slot define what the brand and the creator are sponsoring. Documentation follows the actual use, not a predetermined verdict."
             />
-          </dl>
+          </Reveal>
         </div>
       </div>
     </section>

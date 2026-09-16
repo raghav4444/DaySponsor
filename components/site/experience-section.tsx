@@ -1,10 +1,11 @@
 import { Calendar, Clock, Camera, Star, CheckCircle2 } from 'lucide-react';
+import { Reveal } from '@/components/site/animations/reveal';
 
 export function ExperienceSection() {
   return (
     <section className="py-20 bg-secondary/20 border-y border-border/50">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-16">
+        <Reveal as="div" variant="fade-up" className="text-center mb-16">
           <p className="text-sm font-medium text-accent mb-3">The experience</p>
           <h2 className="text-4xl sm:text-5xl font-semibold tracking-tight">
             Before. During.
@@ -14,9 +15,9 @@ export function ExperienceSection() {
             Every sponsorship is a journey — from the moment a brand picks a slot
             to the honest review that follows.
           </p>
-        </div>
+        </Reveal>
 
-        <div className="grid md:grid-cols-3 gap-6">
+        <Reveal as="div" variant="fade-up" stagger={0.14} className="grid md:grid-cols-3 gap-6">
           <PhaseCard
             phase="Before"
             icon={Calendar}
@@ -54,7 +55,7 @@ export function ExperienceSection() {
               'Creator gets paid. Both sides win.',
             ]}
           />
-        </div>
+        </Reveal>
       </div>
     </section>
   );
