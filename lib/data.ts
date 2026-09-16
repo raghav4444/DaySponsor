@@ -1,175 +1,325 @@
-export type Creator = {
-  username: string;
-  name: string;
-  occupation: string;
-  location: string;
-  flag: string;
-  followers: string;
-  impressions: string;
-  bio: string;
-  avatar: string;
-  dayTitle: string;
-  dayDate: string;
-  category: string;
-  slots: { tier: 'Primary' | 'Featured' | 'Supporting'; price: number; taken: boolean }[];
-  slotsTaken: number;
-  slotsTotal: number;
-};
-
-export const creators: Creator[] = [
-  {
-    username: '@raghvendra',
-    name: 'Raghvendra',
-    occupation: 'Software Developer',
-    location: 'Rotterdam',
-    flag: 'NL',
-    followers: '4.2K',
-    impressions: '~18K monthly',
-    bio: 'Building an AI SaaS in public',
-    avatar: 'https://images.pexels.com/photos/6942776/pexels-photo-6942776.jpeg?auto=compress&cs=tinysrgb&h=400&w=400',
-    dayTitle: "Building my AI startup",
-    dayDate: 'Sept 18',
-    category: 'Developer',
-    slots: [
-      { tier: 'Primary', price: 299, taken: false },
-      { tier: 'Featured', price: 149, taken: true },
-      { tier: 'Supporting', price: 79, taken: false },
-    ],
-    slotsTaken: 1,
-    slotsTotal: 3,
-  },
-  {
-    username: '@sarahbuilds',
-    name: 'Sarah',
-    occupation: 'Product Designer',
-    location: 'Berlin',
-    flag: 'DE',
-    followers: '8.1K',
-    impressions: '~42K monthly',
-    bio: 'Designing in public, shipping weekly',
-    avatar: 'https://images.pexels.com/photos/33680700/pexels-photo-33680700.jpeg?auto=compress&cs=tinysrgb&h=400&w=400',
-    dayTitle: 'Design sprint & client demos',
-    dayDate: 'Sept 20',
-    category: 'Design',
-    slots: [
-      { tier: 'Primary', price: 399, taken: false },
-      { tier: 'Featured', price: 199, taken: false },
-      { tier: 'Supporting', price: 99, taken: true },
-    ],
-    slotsTaken: 1,
-    slotsTotal: 3,
-  },
-  {
-    username: '@alexdev',
-    name: 'Alex',
-    occupation: 'Full-stack Developer',
-    location: 'Amsterdam',
-    flag: 'NL',
-    followers: '2.8K',
-    impressions: '~35K monthly',
-    bio: 'Coding 12 hours for a launch',
-    avatar: 'https://images.pexels.com/photos/749091/pexels-photo-749091.jpeg?auto=compress&cs=tinysrgb&h=400&w=400',
-    dayTitle: 'SaaS launch day marathon',
-    dayDate: 'Sept 22',
-    category: 'Developer',
-    slots: [
-      { tier: 'Primary', price: 249, taken: false },
-      { tier: 'Featured', price: 129, taken: false },
-      { tier: 'Supporting', price: 69, taken: false },
-    ],
-    slotsTaken: 0,
-    slotsTotal: 3,
-  },
-  {
-    username: '@priya',
-    name: 'Priya',
-    occupation: 'Tech Content Creator',
-    location: 'London',
-    flag: 'UK',
-    followers: '12K',
-    impressions: '~85K monthly',
-    bio: 'Reviewing dev tools & AI products',
-    avatar: 'https://images.pexels.com/photos/7717254/pexels-photo-7717254.jpeg?auto=compress&cs=tinysrgb&h=400&w=400',
-    dayTitle: 'Dev conference & networking',
-    dayDate: 'Sept 25',
-    category: 'Tech',
-    slots: [
-      { tier: 'Primary', price: 499, taken: true },
-      { tier: 'Featured', price: 249, taken: false },
-      { tier: 'Supporting', price: 129, taken: false },
-    ],
-    slotsTaken: 1,
-    slotsTotal: 3,
-  },
-  {
-    username: '@tomtravels',
-    name: 'Tom',
-    occupation: 'Travel Creator',
-    location: 'Lisbon',
-    flag: 'PT',
-    followers: '6.5K',
-    impressions: '~28K monthly',
-    bio: 'Digital nomad, working from everywhere',
-    avatar: 'https://images.pexels.com/photos/5308640/pexels-photo-5308640.jpeg?auto=compress&cs=tinysrgb&h=400&w=400',
-    dayTitle: 'Coworking & city exploration',
-    dayDate: 'Sept 26',
-    category: 'Travel',
-    slots: [
-      { tier: 'Primary', price: 299, taken: false },
-      { tier: 'Featured', price: 159, taken: false },
-      { tier: 'Supporting', price: 89, taken: true },
-    ],
-    slotsTaken: 1,
-    slotsTotal: 3,
-  },
-  {
-    username: '@maya',
-    name: 'Maya',
-    occupation: 'Startup Founder',
-    location: 'Stockholm',
-    flag: 'SE',
-    followers: '3.1K',
-    impressions: '~22K monthly',
-    bio: 'Building a fintech in public',
-    avatar: 'https://images.pexels.com/photos/7562139/pexels-photo-7562139.jpeg?auto=compress&cs=tinysrgb&h=400&w=400',
-    dayTitle: 'Pitch day & investor meetings',
-    dayDate: 'Sept 28',
-    category: 'Startup',
-    slots: [
-      { tier: 'Primary', price: 349, taken: false },
-      { tier: 'Featured', price: 179, taken: false },
-      { tier: 'Supporting', price: 89, taken: false },
-    ],
-    slotsTaken: 0,
-    slotsTotal: 3,
-  },
-];
-
-export type ActivityItem = {
-  brand: string;
-  brandColor: string;
-  creator: string;
-  dayType: string;
-  amount: number;
-  time: string;
-};
-
-export const activityFeed: ActivityItem[] = [
-  { brand: 'Cursor', brandColor: 'bg-blue-500', creator: "@alexdev", dayType: "Coding Day", amount: 249, time: '2 min ago' },
-  { brand: 'Notion', brandColor: 'bg-slate-800', creator: "@sarahbuilds", dayType: "Startup Day", amount: 149, time: '8 min ago' },
-  { brand: 'Anker', brandColor: 'bg-emerald-600', creator: "@tomtravels", dayType: "Travel Day", amount: 299, time: '17 min ago' },
-  { brand: 'Linear', brandColor: 'bg-indigo-600', creator: "@raghvendra", dayType: "Developer Day", amount: 149, time: '31 min ago' },
-  { brand: 'Raycast', brandColor: 'bg-rose-500', creator: "@priya", dayType: "Conference Day", amount: 249, time: '45 min ago' },
-  { brand: 'Figma', brandColor: 'bg-orange-500', creator: "@maya", dayType: "Pitch Day", amount: 179, time: '1 hr ago' },
-];
+import {
+  supabase,
+  type CreatorProfile,
+  type Day,
+  type Profile,
+  type Review,
+  type Slot,
+  type Sponsorship,
+} from '@/lib/supabase';
 
 export const categories = [
   'Developer', 'AI', 'Design', 'Travel', 'Fitness', 'Food', 'Gaming', 'Startup', 'Student', 'Tech',
 ];
 
-export const marketplaceStats = [
-  { label: 'Paid to creators', value: '€18,420', sub: 'and growing' },
-  { label: 'Sponsored days', value: '127', sub: 'completed' },
-  { label: 'Brands participating', value: '84', sub: 'and counting' },
-  { label: 'Products tested', value: '2,841', sub: 'real experiences' },
-];
+export type MarketplaceStats = {
+  paidToCreators: number;
+  sponsoredDays: number;
+  brandsParticipating: number;
+  productsTested: number;
+  totalSponsorships: number;
+  averageInvestment: number;
+  averageCreatorPayout: number;
+};
+
+export type MarketplaceStatsResult = {
+  stats: MarketplaceStats | null;
+  unavailable: boolean;
+};
+
+export type LiveActivityItem = {
+  id: string;
+  brand: string;
+  brandHref: string | null;
+  creator: string;
+  creatorHref: string | null;
+  dayTitle: string;
+  dayHref: string;
+  dayType: string;
+  amount: number;
+  time: string;
+};
+
+export type FeaturedCreator = {
+  id: string;
+  username: string;
+  name: string;
+  occupation: string | null;
+  location: string | null;
+  country_code: string;
+  followers: string;
+  impressions: string | null;
+  bio: string | null;
+  avatar: string | null;
+  audience_description: string | null;
+  category: string;
+  day: Pick<Day, 'id' | 'title' | 'day_date' | 'status'>;
+  slots: Slot[];
+};
+
+type SponsorshipStatsRow = Pick<
+  Sponsorship,
+  'id' | 'slot_id' | 'brand_id' | 'amount' | 'creator_amount' | 'status'
+>;
+
+type ActivitySponsorship = Sponsorship & {
+  brand: Pick<Profile, 'name' | 'username'> | null;
+  creator: Pick<Profile, 'name' | 'username'> | null;
+};
+
+type ActivitySlot = Pick<Slot, 'id' | 'day_id'>;
+
+type ActivityDay = Pick<Day, 'id' | 'title' | 'category' | 'day_date'>;
+
+const paidSponsorshipStatuses = new Set([
+  'paid',
+  'day_completed',
+  'review_pending',
+  'completed',
+]);
+
+export function slugifyDayTitle(title: string) {
+  return title
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+export async function loadMarketplaceStats(): Promise<MarketplaceStatsResult> {
+  const [sponsorshipsResult, slotsResult, reviewsResult] = await Promise.all([
+    supabase.from('sponsorships').select('id, slot_id, brand_id, creator_amount, status'),
+    supabase.from('sponsorship_slots').select('id, day_id'),
+    supabase.from('reviews').select('id, published_at'),
+  ]);
+
+  if (sponsorshipsResult.error || slotsResult.error || reviewsResult.error) {
+    return { stats: null, unavailable: true };
+  }
+
+  const sponsorships = (sponsorshipsResult.data || []) as SponsorshipStatsRow[];
+  const paidSponsorships = sponsorships.filter((sponsorship) =>
+    paidSponsorshipStatuses.has(sponsorship.status),
+  );
+  const sponsoredSlotIds = new Set(paidSponsorships.map((sponsorship) => sponsorship.slot_id));
+  const slots = (slotsResult.data || []) as ActivitySlot[];
+  const reviews = (reviewsResult.data || []);
+
+  const totalInvestment = sponsorships.reduce((total, sponsorship) => total + sponsorship.amount, 0);
+  const totalCreatorPayout = paidSponsorships.reduce(
+    (total, sponsorship) => total + sponsorship.creator_amount,
+    0,
+  );
+
+  return {
+    unavailable: false,
+    stats: {
+      paidToCreators: totalCreatorPayout,
+      sponsoredDays: new Set(
+        slots.filter((slot) => sponsoredSlotIds.has(slot.id)).map((slot) => slot.day_id),
+      ).size,
+      brandsParticipating: new Set(paidSponsorships.map((sponsorship) => sponsorship.brand_id)).size,
+      productsTested: reviews.filter((review) => review.published_at).length,
+      totalSponsorships: sponsorships.length,
+      averageInvestment: sponsorships.length
+        ? Math.round(totalInvestment / sponsorships.length)
+        : 0,
+      averageCreatorPayout: paidSponsorships.length
+        ? Math.round(totalCreatorPayout / paidSponsorships.length)
+        : 0,
+    },
+  };
+}
+
+export async function loadLiveActivity() {
+  const { data: sponsorships, error } = await supabase
+    .from('sponsorships')
+    .select(`
+      id,
+      amount,
+      status,
+      created_at,
+      slot_id,
+      brand_id,
+      creator_id,
+      brand:profiles!sponsorships_brand_id_fkey(name, username),
+      creator:profiles!sponsorships_creator_id_fkey(name, username)
+    `)
+    .order('created_at', { ascending: false })
+    .limit(12);
+
+  if (error) {
+    return { items: [] as LiveActivityItem[], unavailable: true };
+  }
+
+  const visibleSponsorships = (sponsorships || []).filter(
+    (sponsorship) => !['cancelled', 'refunded'].includes(sponsorship.status),
+  ) as unknown as ActivitySponsorship[];
+
+  if (visibleSponsorships.length === 0) {
+    return { items: [] as LiveActivityItem[], unavailable: false };
+  }
+
+  const slotIds = visibleSponsorships.map((sponsorship) => sponsorship.slot_id);
+  const [slotsResult, reviewsResult] = await Promise.all([
+    supabase.from('sponsorship_slots').select('id, day_id').in('id', slotIds),
+    supabase.from('reviews').select('sponsorship_id').in('sponsorship_id', visibleSponsorships.map((sponsorship) => sponsorship.id)),
+  ]);
+
+  if (slotsResult.error || reviewsResult.error) {
+    return { items: [] as LiveActivityItem[], unavailable: true };
+  }
+
+  const daysResult = await supabase
+    .from('days')
+    .select('id, title, category, day_date')
+    .in(
+      'id',
+      Array.from(new Set((slotsResult.data || []).map((slot) => slot.day_id))),
+    );
+
+  if (daysResult.error) {
+    return { items: [] as LiveActivityItem[], unavailable: true };
+  }
+
+  const slotsByDay = new Map<string, ActivitySlot[]>();
+  for (const slot of (slotsResult.data || [])) {
+    const existing = slotsByDay.get(slot.day_id) || [];
+    existing.push(slot);
+    slotsByDay.set(slot.day_id, existing);
+  }
+
+  const daysById = new Map((daysResult.data || []).map((day) => [day.id, day]));
+  const reviewedSponsorships = new Set(
+    (reviewsResult.data || []).map((review) => review.sponsorship_id),
+  );
+
+  const items = visibleSponsorships
+    .map((sponsorship) => {
+      const slot = (slotsResult.data || []).find((candidate) => candidate.id === sponsorship.slot_id);
+      const day = slot ? daysById.get(slot.day_id) : null;
+      if (!day) return null;
+
+      const brandName = sponsorship.brand?.name || 'A brand';
+      const creatorName = sponsorship.creator?.username
+        ? `@${sponsorship.creator.username}`
+        : sponsorship.creator?.name || 'A creator';
+      const brandHref = sponsorship.brand?.username ? `/creators/${encodeURIComponent(sponsorship.brand.username)}` : null;
+      const creatorHref = sponsorship.creator?.username
+        ? `/creators/${encodeURIComponent(sponsorship.creator.username)}`
+        : null;
+
+      return {
+        id: sponsorship.id,
+        brand: brandName,
+        brandHref,
+        creator: creatorName,
+        creatorHref,
+        dayTitle: day.title,
+        dayHref: `/days/${slugifyDayTitle(day.title)}`,
+        dayType: day.category,
+        amount: sponsorship.amount,
+        time: formatRelativeTime(sponsorship.created_at),
+      } satisfies LiveActivityItem;
+    })
+    .filter((item): item is LiveActivityItem => Boolean(item));
+
+  return {
+    items: items.slice(0, 8),
+    unavailable: false,
+    hasReviews: reviewedSponsorships.size > 0,
+  };
+}
+
+export async function loadFeaturedCreators() {
+  const { data: daysData, error: daysError } = await supabase
+    .from('days')
+    .select(`
+      *,
+      profiles!days_creator_id_fkey(*),
+      creator_profiles!inner(profile_id:profile_id, *)
+    `)
+    .in('status', ['live', 'in_progress', 'full'])
+    .order('day_date', { ascending: true })
+    .limit(8);
+
+  if (daysError) {
+    return { creators: [] as FeaturedCreator[], unavailable: true };
+  }
+
+  if (!daysData?.length) {
+    return { creators: [] as FeaturedCreator[], unavailable: false };
+  }
+
+  const dayIds = daysData.map((day) => day.id);
+  const { data: slotsData, error: slotsError } = await supabase
+    .from('sponsorship_slots')
+    .select('*')
+    .in('day_id', dayIds)
+    .order('position', { ascending: true });
+
+  if (slotsError) {
+    return { creators: [] as FeaturedCreator[], unavailable: true };
+  }
+
+  const slotsByDay = (slotsData || []).reduce<Record<string, Slot[]>>((acc, slot) => {
+    const normalizedSlot = slot as Slot;
+    if (!acc[normalizedSlot.day_id]) acc[normalizedSlot.day_id] = [];
+    acc[normalizedSlot.day_id].push(normalizedSlot);
+    return acc;
+  }, {});
+
+  const creators = daysData.map((row) => {
+    const day = row as unknown as Day & {
+      profiles: Profile;
+      creator_profiles: CreatorProfile;
+    };
+    const profile = day.profiles;
+    const creatorProfile = day.creator_profiles;
+
+    return {
+      id: day.id,
+      username: profile.username || profile.name.toLowerCase().replace(/\s+/g, '-'),
+      name: profile.name,
+      occupation: creatorProfile.occupation,
+      location: creatorProfile.location,
+      country_code: creatorProfile.country_code,
+      followers: creatorProfile.followers,
+      impressions: creatorProfile.impressions,
+      bio: profile.bio,
+      avatar: profile.avatar_url,
+      audience_description: creatorProfile.audience_description,
+      category: day.category,
+      day: {
+        id: day.id,
+        title: day.title,
+        day_date: day.day_date,
+        status: day.status,
+      },
+      slots: slotsByDay[day.id] || [],
+    } satisfies FeaturedCreator;
+  });
+
+  return { creators, unavailable: false };
+}
+
+function formatRelativeTime(value: string) {
+  const differenceInSeconds = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(value).getTime()) / 1000),
+  );
+
+  if (differenceInSeconds < 60) return 'just now';
+  if (differenceInSeconds < 3600) {
+    const minutes = Math.floor(differenceInSeconds / 60);
+    return `${minutes} min ago`;
+  }
+  if (differenceInSeconds < 86400) {
+    const hours = Math.floor(differenceInSeconds / 3600);
+    return `${hours} hr ago`;
+  }
+
+  const days = Math.floor(differenceInSeconds / 86400);
+  return `${days} d ago`;
+}

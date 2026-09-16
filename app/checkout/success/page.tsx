@@ -29,11 +29,11 @@ export default function CheckoutSuccessPage() {
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-accent/10 mx-auto mb-6 animate-fade-in">
           <CheckCircle2 className="h-8 w-8 text-accent" />
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight mb-3">Sponsorship confirmed!</h1>
+        <h1 className="text-3xl font-semibold tracking-tight mb-3">You&apos;re back</h1>
         <p className="text-muted-foreground mb-8">
-          Your sponsorship has been recorded. The creator has been notified and will
-          start using your product on their day. You&apos;ll receive updates as the
-          campaign progresses.
+          If your payment was completed, the sponsorship is confirmed on your brand
+          dashboard. This page does not confirm it: the Stripe webhook is the only thing
+          that marks a sponsorship paid, so check your dashboard for the real status.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <Button asChild className="rounded-full">
