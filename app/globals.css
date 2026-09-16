@@ -155,6 +155,27 @@
   opacity: 0;
 }
 
+/**
+ * Reduced-motion safety net for GSAP scroll animations.
+ *
+ * GSAP writes inline `style` attributes, so a Tailwind utility class cannot
+ * reliably override them — this needs plain CSS with !important. When the OS
+ * has asked for reduced motion, every animated element snaps to its final
+ * state and scroll-triggered transforms are disabled. Content is never left
+ * hidden, even if a tween is aborted or JS fails after hydration.
+ */
+@media (prefers-reduced-motion: reduce) {
+  [data-anim],
+  [data-anim-group] * {
+    opacity: 1 !important;
+    transform: none !important;
+    clip-path: none !important;
+    filter: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 .grid-bg {
   background-image:
     linear-gradient(to right, hsl(var(--border) / 0.4) 1px, transparent 1px),
