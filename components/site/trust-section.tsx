@@ -1,4 +1,5 @@
 import { ShieldCheck, Star, Eye } from 'lucide-react';
+import { Reveal } from '@/components/site/animations/reveal';
 
 export function TrustSection() {
   return (
@@ -6,7 +7,7 @@ export function TrustSection() {
       <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
         <div className="rounded-3xl border border-border bg-card overflow-hidden">
           <div className="grid md:grid-cols-2">
-            <div className="p-10 sm:p-14">
+            <Reveal as="div" variant="fade-right" className="p-10 sm:p-14">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 text-accent text-xs font-medium mb-6">
                 <ShieldCheck className="h-3.5 w-3.5" />
                 Our trust principle
@@ -25,9 +26,9 @@ export function TrustSection() {
                 Creators control the review. That&apos;s what makes this work.
                 Every review is labeled. Every opinion is real.
               </p>
-            </div>
+            </Reveal>
 
-            <div className="bg-secondary/40 p-10 sm:p-14 flex flex-col justify-center gap-6">
+            <Reveal as="div" variant="pop" delay={0.1} className="bg-secondary/40 p-10 sm:p-14 flex flex-col justify-center gap-6">
               <ReviewPreview
                 brand="Notion"
                 rating={4}
@@ -45,7 +46,7 @@ export function TrustSection() {
                   <span className="font-medium">Fully transparent</span>
                 </div>
               </div>
-            </div>
+            </Reveal>
           </div>
         </div>
       </div>
