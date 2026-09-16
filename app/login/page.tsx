@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase';
-import { isLocalAdminCredentials, localAdminSessionKey } from '@/lib/local-admin';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -21,15 +20,6 @@ export default function LoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-
-    if (isLocalAdminCredentials(email, password)) {
-      window.localStorage.setItem(localAdminSessionKey, 'true');
-      window.dispatchEvent(new Event('local-admin-auth'));
-      toast({ title: 'Welcome back!', description: 'You are signed in as the local test admin.' });
-      router.push('/dashboard/admin');
-      setLoading(false);
-      return;
-    }
 
     const { error } = await supabase.auth.signInWithPassword({
       email,

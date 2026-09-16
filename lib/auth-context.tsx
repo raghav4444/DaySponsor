@@ -3,11 +3,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { supabase, type Profile } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
-import {
-  localAdminProfile,
-  localAdminSessionKey,
-  localAdminUser,
-} from '@/lib/local-admin';
 
 type AuthContextType = {
   user: User | null;
@@ -42,23 +37,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    const loadLocalAdmin = () => {
-      if (window.localStorage.getItem(localAdminSessionKey) !== 'true') return false;
-      setUser(localAdminUser);
-      setProfile(localAdminProfile);
-      setLoading(false);
-      return true;
-    };
-
-    const handleLocalAdminAuth = () => {
-      loadLocalAdmin();
-    };
-
-    window.addEventListener('local-admin-auth', handleLocalAdminAuth);
-    if (loadLocalAdmin()) {
-      return () => window.removeEventListener('local-admin-auth', handleLocalAdminAuth);
-    }
-
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!mounted) return;
       setUser(session?.user ?? null);
@@ -84,12 +62,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       mounted = false;
       listener.subscription.unsubscribe();
-      window.removeEventListener('local-admin-auth', handleLocalAdminAuth);
     };
   }, []);
 
   const signOut = async () => {
-    window.localStorage.removeItem(localAdminSessionKey);
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);

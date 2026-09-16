@@ -53,17 +53,6 @@ function createUnavailableClient() {
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
-export function createAuthenticatedSupabaseClient(token: string) {
-  return createClient(supabaseUrl!, supabaseAnonKey!, {
-    global: {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    },
-  });
-}
-
-
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl!, supabaseAnonKey!, {
       auth: {

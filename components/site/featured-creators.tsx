@@ -1,20 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import { ArrowLeft, ArrowRight, MapPin, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { loadFeaturedCreators, type FeaturedCreator } from '@/lib/data';
+import { creators, type Creator } from '@/lib/data';
 import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
 
 export function FeaturedCreators() {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [creators, setCreators] = useState<FeaturedCreator[]>([]);
-
-  useEffect(() => {
-    loadFeaturedCreators().then((result) => setCreators(result.creators));
-  }, []);
 
   const scroll = (dir: 'left' | 'right') => {
     if (!scrollRef.current) return;
@@ -24,8 +18,6 @@ export function FeaturedCreators() {
       behavior: 'smooth',
     });
   };
-
-  if (creators.length === 0) return null;
 
   return (
     <section id="explore" className="py-20">
@@ -76,16 +68,12 @@ export function FeaturedCreators() {
   );
 }
 
-function CreatorCard({ creator }: { creator: FeaturedCreator }) {
+function CreatorCard({ creator }: { creator: Creator }) {
   const tierIcons: Record<string, string> = {
     Primary: '🥇',
     Featured: '🥈',
     Supporting: '🥉',
   };
-
-  const availableSlots = creator.slots.filter((s) => s.is_available).length;
-  const totalSlots = creator.slots.length;
-  const dayDate = format(new Date(creator.day.day_date), 'MMM d');
 
   return (
     <div className="snap-start shrink-0 w-[340px] group cursor-pointer">
@@ -106,45 +94,35 @@ function CreatorCard({ creator }: { creator: FeaturedCreator }) {
 
         <div className="px-5 pb-5 -mt-10">
           <div className="h-20 w-20 rounded-full border-4 border-card bg-muted overflow-hidden mb-3">
-            {creator.avatar ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={creator.avatar}
-                alt={creator.name}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="h-full w-full flex items-center justify-center text-2xl font-bold text-muted-foreground">
-                {creator.name.charAt(0)}
-              </div>
-            )}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={creator.avatar}
+              alt={creator.name}
+              className="h-full w-full object-cover"
+            />
           </div>
 
           <p className="font-semibold text-lg leading-tight">{creator.username}</p>
           <p className="text-sm text-muted-foreground">{creator.occupation}</p>
 
           <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-            {creator.location && (
-              <span className="flex items-center gap-1">
-                <MapPin className="h-3 w-3" />
-                {creator.location}
-              </span>
-            )}
+            <span className="flex items-center gap-1">
+              <MapPin className="h-3 w-3" />
+              {creator.location} {creator.flag}
+            </span>
             <span className="flex items-center gap-1">
               <Users className="h-3 w-3" />
               {creator.followers}
             </span>
           </div>
 
-          {creator.bio && (
-            <p className="mt-3 text-sm italic text-muted-foreground line-clamp-1">
-              &ldquo;{creator.bio}&rdquo;
-            </p>
-          )}
+          <p className="mt-3 text-sm italic text-muted-foreground line-clamp-1">
+            &ldquo;{creator.bio}&rdquo;
+          </p>
 
           <div className="mt-4 pt-4 border-t border-border">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-              {dayDate} · {creator.day.title}
+              {creator.dayDate} · {creator.dayTitle}
             </p>
             <div className="space-y-1.5">
               {creator.slots.map((slot) => (
@@ -152,7 +130,7 @@ function CreatorCard({ creator }: { creator: FeaturedCreator }) {
                   key={slot.tier}
                   className={cn(
                     'flex items-center justify-between text-sm py-1.5 px-2 rounded-lg transition-colors',
-                    !slot.is_available
+                    slot.taken
                       ? 'bg-muted/40 opacity-60'
                       : 'hover:bg-secondary group-hover:bg-secondary/50'
                   )}
@@ -166,10 +144,10 @@ function CreatorCard({ creator }: { creator: FeaturedCreator }) {
                     <span
                       className={cn(
                         'text-xs',
-                        !slot.is_available ? 'text-muted-foreground' : 'text-accent font-medium'
+                        slot.taken ? 'text-muted-foreground' : 'text-accent font-medium'
                       )}
                     >
-                      {slot.is_available ? 'Open' : 'Taken'}
+                      {slot.taken ? 'Taken' : 'Open'}
                     </span>
                   </div>
                 </div>
@@ -178,10 +156,10 @@ function CreatorCard({ creator }: { creator: FeaturedCreator }) {
           </div>
 
           <div className="mt-4">
-            <Button className="w-full rounded-full" size="sm" variant={availableSlots === 0 ? 'secondary' : 'default'}>
-              {availableSlots === 0
+            <Button className="w-full rounded-full" size="sm" variant={creator.slotsTaken === creator.slotsTotal ? 'secondary' : 'default'}>
+              {creator.slotsTaken === creator.slotsTotal
                 ? 'Fully sponsored'
-                : `Sponsor a slot · ${availableSlots} left`}
+                : `Sponsor a slot · ${creator.slotsTotal - creator.slotsTaken} left`}
             </Button>
           </div>
         </div>

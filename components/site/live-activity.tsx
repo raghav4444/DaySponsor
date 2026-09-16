@@ -1,18 +1,7 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { loadLiveActivity, type LiveActivityItem } from '@/lib/data';
+import { activityFeed } from '@/lib/data';
 
 export function LiveActivity() {
-  const [items, setItems] = useState<LiveActivityItem[]>([]);
-
-  useEffect(() => {
-    loadLiveActivity().then((result) => setItems(result.items));
-  }, []);
-
-  if (items.length === 0) return null;
-
-  const doubled = [...items, ...items];
+  const doubled = [...activityFeed, ...activityFeed];
 
   return (
     <section className="py-20 overflow-hidden">
@@ -45,12 +34,14 @@ export function LiveActivity() {
 
 function ActivityCard({
   brand,
+  brandColor,
   creator,
   dayType,
   amount,
   time,
 }: {
   brand: string;
+  brandColor: string;
   creator: string;
   dayType: string;
   amount: number;
@@ -59,7 +50,7 @@ function ActivityCard({
   return (
     <div className="shrink-0 w-80 rounded-xl border border-border bg-card p-4 hover:shadow-md transition-shadow">
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent text-white text-sm font-bold shrink-0">
+        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${brandColor} text-white text-sm font-bold shrink-0`}>
           {brand.slice(0, 2).toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
