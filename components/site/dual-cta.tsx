@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, DollarSign, Target, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { HomeActionLink } from '@/components/site/home-action-link';
 
 export function DualCTA() {
   return (
@@ -32,10 +33,10 @@ export function DualCTA() {
                   <Stat label="Payout time" value="2-3 days" />
                 </div>
                 <Button className="mt-8 rounded-full group/btn" size="lg" asChild>
-                  <Link href="#cta">
+                  <HomeActionLink>
                     Become a Creator
                     <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover/btn:translate-x-1" />
-                  </Link>
+                  </HomeActionLink>
                 </Button>
               </div>
             </div>
@@ -71,7 +72,7 @@ export function DualCTA() {
                   size="lg"
                   asChild
                 >
-                  <Link href="#explore">
+                  <Link href="/explore">
                     Find a Creator
                     <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover/btn:translate-x-1" />
                   </Link>

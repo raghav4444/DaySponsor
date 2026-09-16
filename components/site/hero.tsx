@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ArrowRight, Star, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { HomeActionLink } from '@/components/site/home-action-link';
 
 export function Hero() {
   return (
@@ -41,13 +42,13 @@ export function Hero() {
 
           <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 animate-fade-up delay-300 opacity-0-init">
             <Button size="lg" className="rounded-full h-12 px-8 text-base group" asChild>
-              <Link href="#cta">
+              <HomeActionLink>
                 Create My Day
                 <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-              </Link>
+              </HomeActionLink>
             </Button>
             <Button size="lg" variant="outline" className="rounded-full h-12 px-8 text-base" asChild>
-              <Link href="#explore">Find a Creator</Link>
+              <Link href="/explore">Find a Creator</Link>
             </Button>
           </div>
 
