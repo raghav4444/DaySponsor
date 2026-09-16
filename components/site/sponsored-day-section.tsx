@@ -1,4 +1,5 @@
 import { Calendar, Layers, Package, Camera, MessageSquare } from 'lucide-react';
+import { Reveal } from '@/components/site/animations/reveal';
 
 const steps = [
   {
@@ -37,15 +38,15 @@ export function SponsoredDaySection() {
   return (
     <section aria-labelledby="sponsored-day-heading" className="border-t border-border/50 py-14 sm:py-20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="mx-auto mb-9 max-w-2xl text-center sm:mb-12">
+        <Reveal as="div" variant="fade-up" className="mx-auto mb-9 max-w-2xl text-center sm:mb-12">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Inside the experience</p>
           <h2 id="sponsored-day-heading" className="text-balance text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
             A sponsored day, <span className="font-display italic font-normal">start to finish.</span>
           </h2>
           <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">From the plan to the final opinion, the activity is the thread that connects it all.</p>
-        </div>
+        </Reveal>
 
-        <ol className="grid gap-0 lg:grid-cols-5 lg:gap-6" aria-label="The five stages of a sponsored day">
+        <Reveal as="ol" variant="fade-up" stagger={0.12} className="grid gap-0 lg:grid-cols-5 lg:gap-6" aria-label="The five stages of a sponsored day">
           {steps.map((step, index) => (
             <li
               key={step.title}
@@ -63,7 +64,7 @@ export function SponsoredDaySection() {
               <p className="mt-4 text-xs font-semibold text-foreground/70">{step.detail}</p>
             </li>
           ))}
-        </ol>
+        </Reveal>
       </div>
     </section>
   );
