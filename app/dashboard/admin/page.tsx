@@ -32,6 +32,8 @@ import {
   TrendingDown,
   Activity,
   Zap,
+  CreditCard,
+  Gavel,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -54,6 +56,21 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { supabase, type Profile, type Day, type Sponsorship } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
+import { formatMinorUnits } from '@/lib/money';
+import { StatusBadge } from '@/components/auction/status-badge';
+import type {
+  AdminSponsorshipRow,
+  AdminSlotRow,
+  AdminTransferRow,
+  AdminRefundRow,
+} from '@/lib/admin-queries';
+
+/**
+ * Financial oversight rows, loaded from the protected admin routes. These carry payout,
+ * refund and transfer state that the browser client's RLS does not expose — and the
+ * mutations on them go through server routes, never through this client.
+ */
+type PaymentRow = AdminSponsorshipRow;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -121,7 +138,7 @@ export default function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false);
 
   // UI state
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'sponsorships' | 'days' | 'analytics'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'sponsorships' | 'payments' | 'auctions' | 'days' | 'analytics'>('overview');
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Search & filter
@@ -136,6 +153,14 @@ export default function AdminDashboard() {
   const [userPage, setUserPage] = useState(1);
   const [sponsorPage, setSponsorPage] = useState(1);
   const [dayPage, setDayPage] = useState(1);
+
+  // Financial oversight (loaded from the protected admin routes, not the browser client)
+  const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([]);
+  const [auctionRows, setAuctionRows] = useState<AdminSlotRow[]>([]);
+  const [transferRows, setTransferRows] = useState<AdminTransferRow[]>([]);
+  const [refundRows, setRefundRows] = useState<AdminRefundRow[]>([]);
+  const [moneyLoading, setMoneyLoading] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   // Modals
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -201,6 +226,139 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (profile?.role === 'admin') loadAdminData();
   }, [profile?.role, loadAdminData]);
+
+  // ── Financial oversight loading ─────────────────────────────────────────────
+  // Reads come from the protected admin routes, which use the service-role client and
+  // re-check the admin role server-side. The browser client has no path to these rows.
+
+  const authHeaders = useCallback(async (): Promise<Record<string, string>> => {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session?.access_token) return {};
+    return { Authorization: `Bearer ${data.session.access_token}` };
+  }, []);
+
+  const loadFinancialData = useCallback(async () => {
+    setMoneyLoading(true);
+    const headers = await authHeaders();
+    const [sponsorshipsRes, auctionsRes, transfersRes] = await Promise.all([
+      fetch('/api/admin/sponsorships', { headers }),
+      fetch('/api/admin/auctions', { headers }),
+      fetch('/api/admin/transfers', { headers }),
+    ]);
+
+    if (sponsorshipsRes.ok) {
+      const { sponsorships } = (await sponsorshipsRes.json()) as { sponsorships: PaymentRow[] };
+      setPaymentRows(sponsorships);
+    }
+    if (auctionsRes.ok) {
+      const { auctions } = (await auctionsRes.json()) as { auctions: AdminSlotRow[] };
+      setAuctionRows(auctions);
+    }
+    if (transfersRes.ok) {
+      const { transfers, refunds } = (await transfersRes.json()) as {
+        transfers: AdminTransferRow[];
+        refunds: AdminRefundRow[];
+      };
+      setTransferRows(transfers);
+      setRefundRows(refunds);
+    }
+    setMoneyLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (profile?.role === 'admin') loadFinancialData();
+  }, [profile?.role, loadFinancialData]);
+
+  // ── Financial actions ───────────────────────────────────────────────────────
+  // Every one of these is a POST to a protected server route. None of them is ever
+  // performed with the browser Supabase client, and none takes an amount from the UI.
+
+  const runMoneyAction = async (
+    key: string,
+    route: string,
+    body: Record<string, unknown>,
+    successMessage: string,
+  ) => {
+    setBusyAction(key);
+    try {
+      const response = await fetch(route, {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const result = (await response.json()) as { ok: boolean; message: string; code: string };
+
+      addToast(result.ok ? successMessage : result.message, result.ok ? 'success' : 'error');
+      await loadFinancialData();
+    } catch {
+      addToast('The request could not be completed.', 'error');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const refundSponsorship = (id: string) =>
+    runMoneyAction(
+      `refund:${id}`,
+      '/api/admin/refund',
+      { sponsorshipId: id },
+      'Refund initiated. Recovery is confirmed only by Stripe.',
+    );
+
+  const toggleHold = (row: PaymentRow) =>
+    runMoneyAction(
+      `hold:${row.id}`,
+      '/api/admin/payout-hold',
+      { sponsorshipId: row.id, hold: !row.payout_hold },
+      row.payout_hold ? 'Payout hold released.' : 'Payout held.',
+    );
+
+  const retryPayout = (id: string) =>
+    runMoneyAction(
+      `payout:${id}`,
+      '/api/admin/retry-payout',
+      { sponsorshipId: id },
+      'Payout released to the creator.',
+    );
+
+  const reconcileOne = async (id: string) => {
+    setBusyAction(`reconcile:${id}`);
+    try {
+      const response = await fetch('/api/admin/reconcile', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sponsorshipId: id }),
+      });
+      const result = (await response.json()) as {
+        ok: boolean;
+        message: string;
+        drift?: string[];
+      };
+
+      if (result.ok) {
+        addToast('No drift detected for this sponsorship.');
+      } else {
+        addToast(result.drift?.join(' ') ?? result.message, 'error');
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const checkDispute = async (id: string) => {
+    setBusyAction(`dispute:${id}`);
+    try {
+      const response = await fetch('/api/admin/dispute', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sponsorshipId: id }),
+      });
+      const result = (await response.json()) as { ok: boolean; message: string };
+      addToast(result.message, result.ok ? 'success' : 'error');
+    } finally {
+      setBusyAction(null);
+    }
+  };
 
   // ── Toast helpers ────────────────────────────────────────────────────────────
 
@@ -392,6 +550,8 @@ export default function AdminDashboard() {
     { key: 'analytics', label: 'Analytics', icon: TrendingUp },
     { key: 'users', label: `Users (${stats?.totalUsers ?? '…'})`, icon: Users },
     { key: 'sponsorships', label: `Sponsorships (${stats?.totalSponsorships ?? '…'})`, icon: DollarSign },
+    { key: 'payments', label: `Payments (${paymentRows.length})`, icon: CreditCard },
+    { key: 'auctions', label: `Auctions (${auctionRows.length})`, icon: Gavel },
     { key: 'days', label: `Days (${stats?.totalDays ?? '…'})`, icon: Calendar },
   ] as const;
 
@@ -936,6 +1096,305 @@ export default function AdminDashboard() {
                 </div>
                 <Pagination page={sponsorPage} total={totalPages(filteredSponsorships)} onChange={setSponsorPage} />
               </>
+            )}
+          </div>
+        )}
+
+        {/* ── PAYMENTS TAB ───────────────────────────────────────────────────── */}
+        {/* Financial oversight. Every mutation below is a POST to a protected server
+            route carrying only a sponsorship id — never an amount, never a Supabase
+            write from the browser client. */}
+        {activeTab === 'payments' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                {paymentRows.length} sponsorship{paymentRows.length === 1 ? '' : 's'} · payouts, refunds and reconciliation
+              </p>
+              <Button variant="outline" size="sm" className="gap-2 rounded-full" onClick={() => loadFinancialData()}>
+                <RefreshCw className={cn('h-3.5 w-3.5', moneyLoading && 'animate-spin')} /> Refresh
+              </Button>
+            </div>
+
+            {moneyLoading && paymentRows.length === 0 ? (
+              <div className="space-y-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-20 rounded-xl border border-border bg-card animate-pulse" />
+                ))}
+              </div>
+            ) : paymentRows.length === 0 ? (
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                No sponsorships to oversee yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {paymentRows.map((row) => (
+                  <div
+                    key={row.id}
+                    data-testid="admin-payment-row"
+                    className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3"
+                  >
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium">
+                            {row.profiles?.name ?? 'Unknown brand'}
+                          </span>
+                          <StatusBadge status={row.status ?? 'pending'} kind="sponsorship" />
+                          <StatusBadge
+                            status={row.payout_hold ? 'on_hold' : (row.payout_status ?? 'none')}
+                            kind="payout"
+                          />
+                          {row.refund_status && row.refund_status !== 'none' && (
+                            <StatusBadge status={row.refund_status} kind="refund" />
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {row.stripe_payment_intent_id
+                            ? `Intent ${row.stripe_payment_intent_id}`
+                            : 'No payment intent recorded'}
+                          {row.payout_hold_reason ? ` · held: ${row.payout_hold_reason}` : ''}
+                        </p>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-5">
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Gross</p>
+                          <p className="text-sm font-semibold">
+                            {formatMinorUnits(row.amount, row.currency ?? undefined)}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Fee</p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatMinorUnits(row.platform_fee, row.currency ?? undefined)}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Creator</p>
+                          <p className="text-sm font-semibold text-accent">
+                            {formatMinorUnits(row.creator_amount, row.currency ?? undefined)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 rounded-full"
+                        disabled={busyAction === `refund:${row.id}` || row.status !== 'paid'}
+                        onClick={() =>
+                          setConfirmDialog({
+                            open: true,
+                            title: 'Refund this sponsorship?',
+                            description:
+                              'The charge is refunded through Stripe. If the creator has already been paid, the transfer is reversed. Recovery is only reported once Stripe confirms it.',
+                            action: () => refundSponsorship(row.id),
+                            variant: 'destructive',
+                          })
+                        }
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" /> Refund
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 rounded-full"
+                        disabled={busyAction === `hold:${row.id}`}
+                        onClick={() => toggleHold(row)}
+                      >
+                        {row.payout_hold ? (
+                          <>
+                            <CheckCheck className="h-3.5 w-3.5" /> Release hold
+                          </>
+                        ) : (
+                          <>
+                            <Ban className="h-3.5 w-3.5" /> Payout hold
+                          </>
+                        )}
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 rounded-full"
+                        disabled={busyAction === `reconcile:${row.id}`}
+                        onClick={() => reconcileOne(row.id)}
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Reconcile
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 rounded-full"
+                        disabled={
+                          busyAction === `payout:${row.id}` ||
+                          row.payout_hold ||
+                          row.payout_status === 'released'
+                        }
+                        onClick={() => retryPayout(row.id)}
+                      >
+                        <Zap className="h-3.5 w-3.5" /> Retry payout
+                      </Button>
+
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-2 rounded-full"
+                        disabled={busyAction === `dispute:${row.id}` || !row.stripe_payment_intent_id}
+                        onClick={() => checkDispute(row.id)}
+                      >
+                        <Shield className="h-3.5 w-3.5" /> Dispute status
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Transfers and refunds are the audit trail for the actions above. */}
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-border bg-card overflow-hidden">
+                <div className="px-5 py-3 border-b border-border bg-secondary/50">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Transfers to creators ({transferRows.length})
+                  </p>
+                </div>
+                <div className="divide-y divide-border max-h-80 overflow-y-auto">
+                  {transferRows.length === 0 ? (
+                    <p className="py-8 text-center text-xs text-muted-foreground">No transfers recorded.</p>
+                  ) : (
+                    transferRows.map((t) => (
+                      <div key={t.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            {t.profiles?.name ?? 'Unknown creator'}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate">{t.stripe_transfer_id}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-semibold text-accent">
+                            {formatMinorUnits(t.creator_amount, t.currency ?? undefined)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {t.payout_released_at
+                              ? new Date(t.payout_released_at).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                })
+                              : '—'}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-card overflow-hidden">
+                <div className="px-5 py-3 border-b border-border bg-secondary/50">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Refunds ({refundRows.length})
+                  </p>
+                </div>
+                <div className="divide-y divide-border max-h-80 overflow-y-auto">
+                  {refundRows.length === 0 ? (
+                    <p className="py-8 text-center text-xs text-muted-foreground">No refunds recorded.</p>
+                  ) : (
+                    refundRows.map((r) => (
+                      <div key={r.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            {r.profiles?.name ?? 'Unknown creator'}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate">{r.stripe_refund_id}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <p className="text-sm font-semibold">
+                            {formatMinorUnits(r.amount, r.currency ?? undefined)}
+                          </p>
+                          {r.refund_status && <StatusBadge status={r.refund_status} kind="refund" />}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── AUCTIONS TAB ──────────────────────────────────────────────────── */}
+        {activeTab === 'auctions' && (
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              {auctionRows.length} auction slot{auctionRows.length === 1 ? '' : 's'} · read-only oversight
+            </p>
+
+            {moneyLoading && auctionRows.length === 0 ? (
+              <div className="space-y-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-16 rounded-xl border border-border bg-card animate-pulse" />
+                ))}
+              </div>
+            ) : auctionRows.length === 0 ? (
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                No auction slots found.
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-border bg-card overflow-hidden">
+                <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 px-5 py-3 border-b border-border bg-secondary/50">
+                  {['Slot', 'Bids', 'Highest', 'Ends', 'Status'].map((h) => (
+                    <span
+                      key={h}
+                      className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                    >
+                      {h}
+                    </span>
+                  ))}
+                </div>
+                <div className="divide-y divide-border">
+                  {auctionRows.map((slot) => (
+                    <div
+                      key={slot.id}
+                      data-testid="admin-auction-row"
+                      className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 items-center px-5 py-3 hover:bg-secondary/30 transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">
+                          {slot.days?.title ?? 'Untitled day'} · {slot.tier ?? 'Slot'}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          Creator: {slot.profiles?.name ?? 'unknown'}
+                        </p>
+                      </div>
+                      <p className="text-sm text-muted-foreground tabular-nums">{slot.bid_count}</p>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold tabular-nums">
+                          {formatMinorUnits(slot.current_highest_bid, slot.currency ?? undefined)}
+                        </p>
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                          from {formatMinorUnits(slot.starting_price, slot.currency ?? undefined)}
+                        </p>
+                      </div>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        {slot.auction_ends_at
+                          ? new Date(slot.auction_ends_at).toLocaleString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : '—'}
+                      </span>
+                      <StatusBadge status={slot.auction_status ?? 'not_listed'} kind="auction" />
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}

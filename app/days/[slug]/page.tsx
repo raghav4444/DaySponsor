@@ -1,31 +1,44 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { MapPin, Users, Calendar, ArrowLeft, Star, Check } from 'lucide-react';
+import { MapPin, Users, Calendar, ArrowLeft, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/hooks/use-toast';
-import { supabase, type Day, type Slot, type Profile, type CreatorProfile } from '@/lib/supabase';
+import { supabase, type Day, type Profile, type CreatorProfile } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
+import { AuctionPanel, type BidOutcome } from '@/components/auction/auction-panel';
+import {
+  loadSlotsForDayWithAuction,
+  loadMyBidsForSlots,
+  type SlotWithAuction,
+} from '@/lib/auction-queries';
+import { formatMinorUnits } from '@/lib/money';
 
+/**
+ * Day detail page.
+ *
+ * The design and route are unchanged; the fixed-price sponsorship behaviour is replaced
+ * by bidding. Slots are loaded server-side through the auction data layer so the public
+ * auction columns (`current_highest_bid`, `bid_count`, `auction_ends_at`) come from one
+ * place, and so the caller's own bid — never anyone else's — is attached as `my_bid`.
+ *
+ * The countdown is visual only: when it reaches zero the client refetches slot state
+ * rather than concluding the auction, because the closing job owns that transition.
+ */
 export default function DayDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const { user, profile } = useAuth();
   const { toast } = useToast();
   const [day, setDay] = useState<(Day & { profiles: Profile; creator_profiles: CreatorProfile | null }) | null>(null);
-  const [slots, setSlots] = useState<Slot[]>([]);
+  const [slots, setSlots] = useState<SlotWithAuction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (id) loadDay(id as string);
-  }, [id]);
-
-  const loadDay = async (dayId: string) => {
+  const loadDay = useCallback(async (dayId: string) => {
     setLoading(true);
 
     const { data: dayData, error: dayError } = await supabase
@@ -43,45 +56,91 @@ export default function DayDetailPage() {
       return;
     }
 
-    const { data: slotsData } = await supabase
-      .from('sponsorship_slots')
-      .select('*')
-      .eq('day_id', dayId)
-      .order('position', { ascending: true });
-
     setDay(dayData as unknown as Day & { profiles: Profile; creator_profiles: CreatorProfile });
-    setSlots((slotsData || []) as Slot[]);
+
+    // Auction columns are read through the data layer, which is the single seam that
+    // changes when Engineer A's generated types land.
+    const auctionSlots = await loadSlotsForDayWithAuction(dayId);
+    setSlots(auctionSlots);
     setLoading(false);
-  };
+  }, []);
 
-  const handleSponsor = async (slot: Slot) => {
-    if (!user || !profile) {
-      toast({ title: 'Please sign in', description: 'You need an account to sponsor a day.' });
-      router.push('/login');
-      return;
-    }
+  useEffect(() => {
+    if (id) loadDay(id as string);
+  }, [id, loadDay]);
 
-    if (profile.role !== 'brand') {
-      toast({
-        title: 'Brand account required',
-        description: 'Switch to a brand account to sponsor days.',
-        variant: 'destructive',
+  // Attach the caller's own bids, if any. Only own rows are fetched, so no other brand's
+  // identity can reach the client.
+  useEffect(() => {
+    if (!profile?.id || slots.length === 0) return;
+    loadMyBidsForSlots(
+      profile.id,
+      slots.map((s) => s.id),
+    ).then((bySlot) => {
+      setSlots((current) =>
+        current.map((slot) => {
+          const myBid = bySlot.get(slot.id) ?? null;
+          return {
+            ...slot,
+            my_bid: myBid,
+            is_winning: Boolean(myBid && (myBid.status === 'winning' || myBid.status === 'won')),
+          };
+        }),
+      );
+    });
+  }, [profile?.id, slots.length]);
+
+  const handleElapsed = useCallback(() => {
+    // The countdown hit zero: refetch instead of concluding. The server owns close time.
+    if (id) loadDay(id as string);
+  }, [id, loadDay]);
+
+  const handlePlaceBid = useCallback(
+    async (slotId: string, amountMinorUnits: number): Promise<BidOutcome> => {
+      if (!user || !profile) {
+        toast({ title: 'Please sign in', description: 'You need an account to bid.' });
+        router.push('/login');
+        return { ok: false };
+      }
+
+      if (profile.role !== 'brand') {
+        return {
+          ok: false,
+          message: 'Switch to a brand account to bid.',
+        };
+      }
+
+      const response = await fetch('/api/auction/bids', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slotId, amount: amountMinorUnits }),
       });
-      return;
-    }
 
-    if (!slot.is_available) {
-      toast({ title: 'Slot taken', description: 'This slot is no longer available.', variant: 'destructive' });
-      return;
-    }
+      const payload = (await response.json()) as {
+        error?: string;
+        code?: string;
+        currentHighestBid?: number;
+        auctionEndsAt?: string | null;
+        status?: string | null;
+        bidId?: string | null;
+      };
 
-    if (profile.user_id === day?.profiles?.user_id) {
-      toast({ title: 'Cannot sponsor your own day', variant: 'destructive' });
-      return;
-    }
+      if (!response.ok) {
+        // A conflict carries the live current bid back so the UI can update to it.
+        return {
+          ok: false,
+          currentHighestBid: payload.currentHighestBid,
+          message: payload.error,
+        };
+      }
 
-    router.push(`/checkout/${slot.id}`);
-  };
+      return {
+        ok: true,
+        currentHighestBid: payload.currentHighestBid,
+      };
+    },
+    [user, profile, router, toast],
+  );
 
   if (loading) {
     return (
@@ -117,6 +176,7 @@ export default function DayDetailPage() {
   });
 
   const isOwnDay = user?.id === day.profiles?.user_id;
+  const openAuctions = slots.filter((s) => s.auction_status === 'open').length;
 
   return (
     <div className="min-h-screen pt-20">
@@ -164,8 +224,8 @@ export default function DayDetailPage() {
                     <p className="font-semibold text-lg mt-1">{day.expected_reach}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status</p>
-                    <p className="font-semibold text-lg mt-1 capitalize">{day.status.replace('_', ' ')}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Open auctions</p>
+                    <p className="font-semibold text-lg mt-1">{openAuctions}</p>
                   </div>
                 </div>
               </div>
@@ -204,53 +264,27 @@ export default function DayDetailPage() {
 
           <div>
             <div className="rounded-2xl border border-border bg-card p-6 sticky top-24">
-              <h2 className="font-semibold text-lg mb-1">Available sponsorships</h2>
-              <p className="text-sm text-muted-foreground mb-4">Choose a slot to sponsor this day</p>
+              <h2 className="font-semibold text-lg mb-1">Sponsorship auctions</h2>
+              <p className="text-sm text-muted-foreground mb-4">Bid on a slot for this day</p>
 
               <div className="space-y-3">
                 {slots.map((slot) => (
-                  <div
-                    key={slot.id}
-                    className={cn(
-                      'rounded-xl border p-4 transition-all',
-                      selectedSlot === slot.id && 'border-foreground ring-2 ring-foreground/10',
-                      slot.is_available
-                        ? 'border-border cursor-pointer hover:border-foreground/30 hover:shadow-sm'
-                        : 'border-border/50 opacity-60'
-                    )}
-                    onClick={() => slot.is_available && setSelectedSlot(slot.id)}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="flex items-center gap-2">
-                        <span className="text-xl">{tierIcons[slot.tier]}</span>
-                        <span className="font-semibold">{slot.tier} Sponsor</span>
-                      </span>
-                      <span className="font-bold text-lg">€{slot.price}</span>
+                  <div key={slot.id}>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1.5">
+                      <span className="text-lg">{tierIcons[slot.tier]}</span>
+                      <span className="font-semibold text-foreground">{slot.tier} Sponsor</span>
                     </div>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      {slot.description || tierDescriptions[slot.tier]}
-                    </p>
-                    <div className="flex items-center justify-between">
-                      {slot.is_available ? (
-                        <span className="text-xs text-accent font-medium flex items-center gap-1">
-                          <Check className="h-3 w-3" /> Available
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Already sponsored</span>
-                      )}
-                      {slot.is_available && !isOwnDay && (
-                        <Button
-                          size="sm"
-                          className="rounded-full"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleSponsor(slot);
-                          }}
-                        >
-                          Sponsor this slot
-                        </Button>
-                      )}
-                    </div>
+                    {slot.description || tierDescriptions[slot.tier] ? (
+                      <p className="text-xs text-muted-foreground mb-2">
+                        {slot.description || tierDescriptions[slot.tier]}
+                      </p>
+                    ) : null}
+                    <AuctionPanel
+                      slot={slot}
+                      onSubmitBid={handlePlaceBid}
+                      onAuctionElapsed={handleElapsed}
+                      isOwnDay={isOwnDay}
+                    />
                   </div>
                 ))}
               </div>

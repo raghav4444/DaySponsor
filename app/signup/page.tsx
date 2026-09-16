@@ -21,6 +21,7 @@ export default function SignupPage() {
   const { toast } = useToast();
 
   const handleSignup = async (e: React.FormEvent) => {
+    console.log("Form submitted");
     e.preventDefault();
     setLoading(true);
 
@@ -31,6 +32,8 @@ export default function SignupPage() {
         data: { name, username, role },
       },
     });
+
+    console.log("Supabase signup result:", { data, error });
 
     if (error) {
       toast({
@@ -43,6 +46,11 @@ export default function SignupPage() {
     }
 
     if (data.user) {
+      // If a session was returned, ensure the client is authenticated
+      if (data.session) {
+        console.log("Session active, using for profile insert");
+      }
+
       const { error: profileError } = await supabase.from('profiles').insert({
         user_id: data.user.id,
         email,
@@ -173,7 +181,14 @@ export default function SignupPage() {
               autoComplete="new-password"
             />
           </div>
-          <Button type="submit" className="w-full rounded-full" disabled={loading}>
+          <Button
+            type="submit"
+            className="w-full rounded-full"
+            disabled={loading}
+            onClick={(e) => {
+                console.log("Button clicked explicitly");
+            }}
+          >
             {loading ? 'Creating account...' : 'Create account'}
             {!loading && <ArrowRight className="ml-2 h-4 w-4" />}
           </Button>
