@@ -7,6 +7,10 @@ import { Badge } from '@/components/ui/badge';
 import { loadFeaturedCreators, type FeaturedCreator } from '@/lib/data';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { gsap, ScrollTrigger, refreshScrollTriggers } from '@/hooks/use-gsap';
+import { Reveal } from '@/components/site/animations/reveal';
+
+gsap.registerPlugin(ScrollTrigger);
 
 export function FeaturedCreators() {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -15,6 +19,33 @@ export function FeaturedCreators() {
   useEffect(() => {
     loadFeaturedCreators().then((result) => setCreators(result.creators));
   }, []);
+
+  useEffect(() => {
+    if (creators.length === 0) return;
+    const grid = scrollRef.current;
+    if (!grid) return;
+
+    // Cards enter as a horizontal cascade; the track itself settles in.
+    const ctx = gsap.context(() => {
+      gsap.from(grid.children, {
+        x: 40,
+        opacity: 0,
+        duration: 0.7,
+        ease: 'power3.out',
+        stagger: 0.09,
+        scrollTrigger: {
+          trigger: grid,
+          start: 'top 85%',
+          toggleActions: 'play none none reverse',
+        },
+      });
+    }, grid);
+
+    // Creators load after first paint — recompute trigger positions.
+    refreshScrollTriggers();
+
+    return () => ctx.revert();
+  }, [creators.length]);
 
   const scroll = (dir: 'left' | 'right') => {
     if (!scrollRef.current) return;
@@ -30,7 +61,7 @@ export function FeaturedCreators() {
   return (
     <section id="explore" className="py-20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex items-end justify-between mb-12">
+        <Reveal as="div" variant="fade-up" className="flex items-end justify-between mb-12">
           <div>
             <div className="flex items-center gap-2 mb-3">
               <span className="flex h-2 w-2 rounded-full bg-accent animate-pulse-dot" />
@@ -60,7 +91,7 @@ export function FeaturedCreators() {
               <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
-        </div>
+        </Reveal>
 
         <div
           ref={scrollRef}
