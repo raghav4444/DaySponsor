@@ -1,10 +1,11 @@
 import { Check, CircleHelp, Eye, ShieldCheck, X } from 'lucide-react';
+import { Reveal } from '@/components/site/animations/reveal';
 
 export function TransparencySection() {
   return (
     <section aria-labelledby="transparency-heading" className="border-y border-border/50 bg-secondary/20 py-16 sm:py-24">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="mb-10 flex flex-col justify-between gap-6 lg:mb-12 lg:flex-row lg:items-end">
+        <Reveal as="div" variant="fade-up" className="mb-10 flex flex-col justify-between gap-6 lg:mb-12 lg:flex-row lg:items-end">
           <div className="max-w-2xl">
             <div className="mb-4 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-accent">
               <ShieldCheck className="h-4 w-4" />
@@ -17,9 +18,9 @@ export function TransparencySection() {
           <p className="max-w-sm text-sm leading-relaxed text-muted-foreground lg:pb-1">
             Every day has a clear scope, a clear price, and room for an honest opinion. No hidden expectations.
           </p>
-        </div>
+        </Reveal>
 
-        <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+        <Reveal as="div" variant="scale" className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
           <div className="grid md:grid-cols-2">
             <PolicyPanel
               icon={Check}
@@ -61,9 +62,9 @@ export function TransparencySection() {
               </div>
             </div>
           </div>
-        </div>
+        </Reveal>
 
-        <dl className="mt-10 grid gap-0 divide-y divide-border border-y border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        <Reveal as="dl" variant="fade-up" stagger={0.12} delay={0.1} className="mt-10 grid gap-0 divide-y divide-border border-y border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           <Principle
             icon={CircleHelp}
             title="Creator-defined tiers"
@@ -79,7 +80,7 @@ export function TransparencySection() {
             title="Availability in context"
             description="Open means offered; taken means unavailable. Always check the date and slot together."
           />
-        </dl>
+        </Reveal>
       </div>
     </section>
   );

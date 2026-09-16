@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ArrowRight, DollarSign, Target, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { HomeActionLink } from '@/components/site/home-action-link';
+import { Reveal } from '@/components/site/animations/reveal';
 
 export function DualCTA() {
   return (
@@ -9,7 +10,7 @@ export function DualCTA() {
       <section id="creators" className="py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="grid md:grid-cols-2 gap-6">
-            <div className="group relative rounded-3xl border border-border bg-card p-10 sm:p-14 overflow-hidden transition-all hover:shadow-xl">
+            <Reveal as="div" variant="fade-right" className="group relative rounded-3xl border border-border bg-card p-10 sm:p-14 overflow-hidden transition-all hover:shadow-xl">
               <div
                 className="absolute -top-20 -right-20 w-60 h-60 rounded-full opacity-10 blur-3xl"
                 style={{ background: 'radial-gradient(circle, hsl(158 64% 42%), transparent 70%)' }}
@@ -39,9 +40,9 @@ export function DualCTA() {
                   </HomeActionLink>
                 </Button>
               </div>
-            </div>
+            </Reveal>
 
-            <div id="brands" className="group relative rounded-3xl border border-border bg-foreground text-background p-10 sm:p-14 overflow-hidden transition-all hover:shadow-xl">
+            <Reveal as="div" id="brands" variant="fade-left" delay={0.1} className="group relative rounded-3xl border border-border bg-foreground text-background p-10 sm:p-14 overflow-hidden transition-all hover:shadow-xl">
               <div
                 className="absolute -top-20 -right-20 w-60 h-60 rounded-full opacity-20 blur-3xl"
                 style={{ background: 'radial-gradient(circle, hsl(158 64% 42%), transparent 70%)' }}
@@ -78,7 +79,7 @@ export function DualCTA() {
                   </Link>
                 </Button>
               </div>
-            </div>
+            </Reveal>
           </div>
         </div>
       </section>

@@ -1,5 +1,6 @@
 import { CheckCircle2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Reveal } from '@/components/site/animations/reveal';
 
 const audiences = [
   {
@@ -30,13 +31,13 @@ export function ValueSection() {
   return (
     <section aria-labelledby="value-heading" className="py-16 sm:py-24 bg-secondary/20 border-y border-border/50">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-12">
+        <Reveal as="div" variant="fade-up" className="text-center mb-12">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Value for both sides</p>
           <h2 id="value-heading" className="text-balance text-3xl sm:text-4xl font-semibold tracking-tight leading-tight">
             Different goals. <span className="font-display italic font-normal">A shared experience.</span>
           </h2>
-        </div>
-        <div className="grid md:grid-cols-2 gap-6">
+        </Reveal>
+        <Reveal as="div" variant="fade-up" stagger={0.15} className="grid md:grid-cols-2 gap-6">
           {audiences.map((audience) => (
             <Card key={audience.label} className="rounded-2xl shadow-none">
               <CardHeader>
@@ -55,7 +56,7 @@ export function ValueSection() {
               </CardContent>
             </Card>
           ))}
-        </div>
+        </Reveal>
       </div>
     </section>
   );
