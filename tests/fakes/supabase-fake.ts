@@ -191,7 +191,7 @@ function execute(
   if (write) {
     if (write.kind === 'insert') {
       for (const row of write.rows ?? []) {
-        const conflict = uniqueConflict(table, row);
+        const conflict = uniqueConflict(state, table, row);
         if (conflict) return { data: null, error: conflict };
         state.database[table].push({ ...row });
       }
@@ -278,7 +278,11 @@ function matches(row: Row, filters: Extract<QueryStep, { kind: 'eq' | 'in' }>[])
  *
  * Returns the PostgREST error a duplicate insert would raise, or null when the row is new.
  */
-function uniqueConflict(table: string, row: Row): { code: string; message: string } | null {
+function uniqueConflict(
+  state: FakeSupabaseState,
+  table: string,
+  row: Row,
+): { code: string; message: string } | null {
   if (table !== 'webhook_events') return null;
   const eventId = row.event_id;
   if (typeof eventId !== 'string') return null;
