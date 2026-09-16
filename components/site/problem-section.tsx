@@ -1,10 +1,11 @@
 import { ArrowRight, Calendar, Package } from 'lucide-react';
+import { Reveal } from '@/components/site/animations/reveal';
 
 export function ProblemSection() {
   return (
     <section aria-labelledby="problem-heading" className="py-16 sm:py-20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="mb-10 flex flex-col justify-between gap-5 lg:mb-12 lg:flex-row lg:items-end">
+        <Reveal as="div" variant="fade-up" className="mb-10 flex flex-col justify-between gap-5 lg:mb-12 lg:flex-row lg:items-end">
           <div>
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-accent">The problem</p>
             <h2 id="problem-heading" className="text-balance text-3xl font-semibold leading-tight tracking-tight sm:text-5xl">
@@ -14,9 +15,9 @@ export function ProblemSection() {
           <p className="max-w-md text-sm leading-relaxed text-muted-foreground lg:pb-1">
             An audience looking for relevant opportunities. A product looking for a real place in someone&apos;s day.
           </p>
-        </div>
+        </Reveal>
 
-        <div className="grid overflow-hidden rounded-2xl border border-border bg-card shadow-sm md:grid-cols-2">
+        <Reveal as="div" variant="scale" className="grid overflow-hidden rounded-2xl border border-border bg-card shadow-sm md:grid-cols-2">
           <ProblemPanel
             index="01"
             icon={Calendar}
@@ -34,15 +35,15 @@ export function ProblemSection() {
             outcome="Start with a defined creator activity and a relevant experience."
             muted
           />
-        </div>
+        </Reveal>
 
-        <div className="mt-6 flex flex-col items-center justify-center gap-3 text-center sm:flex-row">
+        <Reveal as="div" variant="fade" delay={0.15} className="mt-6 flex flex-col items-center justify-center gap-3 text-center sm:flex-row">
           <span className="text-sm text-muted-foreground">DaySponsor brings both sides together around</span>
           <span className="inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/5 px-3 py-1.5 text-sm font-medium text-foreground">
             a real creator day
             <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 text-accent" />
           </span>
-        </div>
+        </Reveal>
       </div>
     </section>
   );
