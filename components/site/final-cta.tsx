@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowRight, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { HomeActionLink } from '@/components/site/home-action-link';
 
 export function FinalCTA() {
   return (
@@ -33,13 +34,13 @@ export function FinalCTA() {
 
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
           <Button size="lg" className="rounded-full h-12 px-8 text-base group" asChild>
-            <Link href="#explore">
+            <Link href="/explore">
               Explore creators
               <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
             </Link>
           </Button>
           <Button size="lg" variant="outline" className="rounded-full h-12 px-8 text-base" asChild>
-            <Link href="#creators">Create My Day</Link>
+            <HomeActionLink>Create My Day</HomeActionLink>
           </Button>
         </div>
       </div>
