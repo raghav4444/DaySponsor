@@ -202,9 +202,10 @@ function execute(
         state.database[table].push(stored);
         insertedRows.push(stored);
       }
-      // `.insert().select()` resolves to the stored rows so callers see server-generated
-      // columns; the whole row is returned, a superset of any requested column list.
-      return { data: insertedRows[0] ?? null, error: null };
+      // `.insert().select()` resolves to the *array* of stored rows — the real client
+      // returns an array even after `.single()`, so callers must unwrap it. Mirroring
+      // that shape here is what makes the fake able to catch an unwrapped read.
+      return { data: insertedRows.length ? insertedRows : null, error: null };
     }
 
     if (write.kind === 'upsert') {

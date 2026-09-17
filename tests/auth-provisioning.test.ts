@@ -168,6 +168,16 @@ describe('ensureProfileForUser', () => {
 
     failingRestore();
   });
+
+  it('returns a real profile id, not the array the client hands back', async () => {
+    // supabase-js resolves `.insert().select().single()` to an *array*, not a row. Before
+    // `asRow` unwrapped it, `profile.id` was undefined and the creator_profiles row was
+    // written against the literal string "undefined", unlinking the two tables.
+    const result = await ensureProfileForUser(makeUser(), { name: 'Jane Doe' });
+
+    expect(typeof result.profile.id).toBe('string');
+    expect(result.profile.id).not.toBe('undefined');
+  });
 });
 
 describe('ensureCreatorProfileForProfileId', () => {
@@ -228,6 +238,16 @@ describe('provisionUser', () => {
 
     expect(result.profile.role).toBe('brand');
     expect(state.database.creator_profiles ?? []).toHaveLength(0);
+  });
+
+  it('links the creator_profiles row to the generated profile id', async () => {
+    // The whole point of unwrapping the client's array: the child row must reference the
+    // parent's real primary key, so a creator's earnings land against their own profile.
+    const result = await provisionUser(makeUser(), { name: 'Jane Doe' });
+
+    expect(state.database.creator_profiles).toHaveLength(1);
+    expect(state.database.creator_profiles[0].profile_id).toBe(result.profile.id);
+    expect(state.database.creator_profiles[0].profile_id).not.toBe('undefined');
   });
 
   it('a returning Google user passes through without duplicating rows', async () => {

@@ -34,6 +34,20 @@ export type ProvisioningResult = {
   created: boolean;
 };
 
+/**
+ * Unwraps a PostgREST response into a single row.
+ *
+ * supabase-js returns an *array* from `.insert().select().single()` even though
+ * `.single()` is meant to promise one row — the array is always present, and treating it
+ * as the row itself silently yields `undefined` for every column. Both the array and the
+ * bare-row shapes are normalised here so callers can read `profile.id` either way.
+ */
+function asRow(data: unknown): Record<string, unknown> | null {
+  if (Array.isArray(data)) return data[0] ?? null;
+  if (data && typeof data === 'object') return data as Record<string, unknown>;
+  return null;
+}
+
 /** Reads the name an OAuth or email signup supplied, falling back to the email handle. */
 function resolveName(user: User, hints: ProvisioningHints): string {
   const fromHint = hints.name?.trim();
@@ -77,18 +91,24 @@ export async function ensureProfileForUser(
 ): Promise<ProvisioningResult> {
   const client = getAdminClient();
 
+  // Same columns as the insert below: an existing row must carry the primary key too, so
+  // that the caller links the creator_profiles row to the right profile whichever path
+  // produced it.
   const { data: existing, error: lookupError } = await client
     .from('profiles')
-    .select('id, role, user_id')
+    .select('id, role, user_id, email, name, username')
     .eq('user_id', user.id)
     .maybeSingle();
 
   if (lookupError) {
-    throw new Error(`Could not look up a profile: ${lookupError.message}`);
+    throw new Error(
+      `Could not look up a profile: ${lookupError.message ?? JSON.stringify(lookupError)}`,
+    );
   }
 
-  if (existing) {
-    return { profile: existing, created: false };
+  const existingRow = asRow(existing);
+  if (existingRow) {
+    return { profile: existingRow, created: false };
   }
 
   const role = hints.role ?? 'creator';
@@ -101,10 +121,13 @@ export async function ensureProfileForUser(
     role,
   };
 
+  // Select every column the caller needs. PostgREST only returns the columns named in
+  // `select()`; asking for the primary key here is what lets the creator_profiles row
+  // below reference it. The generated `id` is otherwise invisible to the caller.
   const { data: inserted, error: insertError } = await client
     .from('profiles')
     .insert(row)
-    .select('id, role, user_id')
+    .select('id, role, user_id, email, name, username')
     .single();
 
   if (insertError || !inserted) {
@@ -114,20 +137,25 @@ export async function ensureProfileForUser(
     if (insertError?.code === '23505') {
       const { data: retry, error: retryError } = await client
         .from('profiles')
-        .select('id, role, user_id')
+        .select('id, role, user_id, email, name, username')
         .eq('user_id', user.id)
         .maybeSingle();
-      if (retryError || !retry) {
+      const retryRow = asRow(retry);
+      if (retryError || !retryRow) {
         throw new Error(
           `Profile exists but could not be re-read: ${retryError?.message ?? 'unknown'}`,
         );
       }
-      return { profile: retry, created: false };
+      return { profile: retryRow, created: false };
     }
     throw new Error(`Could not create a profile: ${insertError?.message ?? 'unknown'}`);
   }
 
-  return { profile: inserted, created: true };
+  const insertedRow = asRow(inserted);
+  if (!insertedRow) {
+    throw new Error('Could not create a profile: the insert returned no row.');
+  }
+  return { profile: insertedRow, created: true };
 }
 
 /**
@@ -145,10 +173,12 @@ export async function ensureCreatorProfileForProfileId(profileId: string): Promi
     .maybeSingle();
 
   if (lookupError) {
-    throw new Error(`Could not look up a creator profile: ${lookupError.message}`);
+    throw new Error(
+      `Could not look up a creator profile: ${lookupError.message ?? JSON.stringify(lookupError)}`,
+    );
   }
 
-  if (existing) return;
+  if (asRow(existing)) return;
 
   const { error: insertError } = await client
     .from('creator_profiles')
@@ -159,7 +189,9 @@ export async function ensureCreatorProfileForProfileId(profileId: string): Promi
   // 23505 is the duplicate-key error a racing provision leaves behind; the row exists, so
   // the caller's goal is met and there is nothing more to do.
   if (insertError && insertError.code !== '23505') {
-    throw new Error(`Could not create a creator profile: ${insertError.message}`);
+    throw new Error(
+      `Could not create a creator profile: ${insertError.message ?? JSON.stringify(insertError)}`,
+    );
   }
 }
 
