@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ArrowRight, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { HomeActionLink } from '@/components/site/home-action-link';
+import { Reveal } from '@/components/site/animations/reveal';
 
 export function FinalCTA() {
   return (
@@ -12,7 +13,7 @@ export function FinalCTA() {
         style={{ background: 'radial-gradient(circle, hsl(158 64% 42%), transparent 70%)' }}
       />
 
-      <div className="relative mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 text-center">
+      <Reveal as="div" variant="blur" className="relative mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 text-center">
         <div className="flex justify-center mb-6">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-foreground text-background">
             <Sparkles className="h-6 w-6" />
@@ -43,7 +44,7 @@ export function FinalCTA() {
             <HomeActionLink>Create My Day</HomeActionLink>
           </Button>
         </div>
-      </div>
+      </Reveal>
     </section>
   );
 }

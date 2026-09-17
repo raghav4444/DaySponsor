@@ -1,7 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { loadMarketplaceStats, type MarketplaceStats } from '@/lib/data';
+import { gsap, ScrollTrigger, refreshScrollTriggers } from '@/hooks/use-gsap';
+
+gsap.registerPlugin(ScrollTrigger);
 
 const currency = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -15,6 +18,7 @@ export function StatsBar() {
   const [stats, setStats] = useState<MarketplaceStats | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -24,12 +28,38 @@ export function StatsBar() {
       setStats(result.stats);
       setUnavailable(result.unavailable);
       setLoading(false);
+      // The section's height changes once real data lands, so trigger
+      // positions computed against the loading skeleton are now stale.
+      refreshScrollTriggers();
     });
 
     return () => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    const grid = gridRef.current;
+    if (!grid) return;
+
+    const ctx = gsap.context(() => {
+      gsap.from(grid.children, {
+        y: 18,
+        opacity: 0,
+        duration: 0.6,
+        ease: 'power3.out',
+        stagger: 0.08,
+        scrollTrigger: {
+          trigger: grid,
+          start: 'top 85%',
+          toggleActions: 'play none none reverse',
+        },
+      });
+    }, grid);
+
+    return () => ctx.revert();
+  }, [loading]);
 
   return (
     <section className="relative py-12 border-y border-border/50 bg-secondary/20">
@@ -55,7 +85,7 @@ export function StatsBar() {
             <p className="text-xs text-muted-foreground mt-1">Real activity will appear here as sponsorships are published.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-4">
+          <div ref={gridRef} className="grid grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-4">
             <Stat value={currency.format(stats.paidToCreators)} label="Paid to creators" sub="and growing" />
             <Stat value={integer.format(stats.sponsoredDays)} label="Sponsored days" sub="completed or in progress" />
             <Stat value={integer.format(stats.brandsParticipating)} label="Brands participating" sub="and counting" />
@@ -69,7 +99,7 @@ export function StatsBar() {
 
 function Stat({ value, label, sub }: { value: string; label: string; sub: string }) {
   return (
-    <div className="text-center lg:text-left lg:border-l lg:border-border/50 lg:pl-6 first:lg:border-l-0 first:lg:pl-0">
+    <div data-anim className="text-center lg:text-left lg:border-l lg:border-border/50 lg:pl-6 first:lg:border-l-0 first:lg:pl-0">
       <p className="text-3xl sm:text-4xl font-semibold tracking-tight">{value}</p>
       <p className="mt-1 text-sm font-medium text-foreground">{label}</p>
       <p className="text-xs text-muted-foreground">{sub}</p>

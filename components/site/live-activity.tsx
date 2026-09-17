@@ -1,14 +1,45 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { loadLiveActivity, type LiveActivityItem } from '@/lib/data';
+import { gsap, ScrollTrigger, refreshScrollTriggers } from '@/hooks/use-gsap';
+import { Reveal } from '@/components/site/animations/reveal';
+
+gsap.registerPlugin(ScrollTrigger);
 
 export function LiveActivity() {
   const [items, setItems] = useState<LiveActivityItem[]>([]);
+  const trackRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadLiveActivity().then((result) => setItems(result.items));
   }, []);
+
+  useEffect(() => {
+    if (items.length === 0) return;
+    const track = trackRef.current;
+    if (!track) return;
+
+    // The CSS marquee loops the doubled list; scrub it with scroll so the
+    // speed feels tied to the reader's pace. Only on reduced-motion-safe
+    // viewports — the CSS animation is disabled by the global media query.
+    const ctx = gsap.context(() => {
+      gsap.from(track, {
+        opacity: 0,
+        duration: 0.8,
+        ease: 'power2.out',
+        scrollTrigger: {
+          trigger: track,
+          start: 'top 90%',
+          toggleActions: 'play none none reverse',
+        },
+      });
+    }, track);
+
+    refreshScrollTriggers();
+
+    return () => ctx.revert();
+  }, [items.length]);
 
   if (items.length === 0) return null;
 
@@ -17,7 +48,7 @@ export function LiveActivity() {
   return (
     <section className="py-20 overflow-hidden">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mb-12">
-        <div className="text-center">
+        <Reveal as="div" variant="fade-up" className="text-center">
           <div className="flex items-center justify-center gap-2 mb-3">
             <span className="flex h-2 w-2 rounded-full bg-accent animate-pulse-dot" />
             <p className="text-sm font-medium text-accent">Today&apos;s sponsors</p>
@@ -26,14 +57,14 @@ export function LiveActivity() {
             The marketplace is
             <span className="font-display italic font-normal"> alive.</span>
           </h2>
-        </div>
+        </Reveal>
       </div>
 
       <div className="relative">
         <div className="absolute left-0 top-0 bottom-0 w-32 bg-gradient-to-r from-background to-transparent z-10 pointer-events-none" />
         <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-background to-transparent z-10 pointer-events-none" />
 
-        <div className="flex gap-4 animate-scroll-x w-max">
+        <div ref={trackRef} className="flex gap-4 animate-scroll-x w-max">
           {doubled.map((item, i) => (
             <ActivityCard key={i} {...item} />
           ))}

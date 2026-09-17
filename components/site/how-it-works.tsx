@@ -1,11 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Calendar, Package, Star, Search, CreditCard, Send, CheckCircle2, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { gsap, ScrollTrigger, refreshScrollTriggers } from '@/hooks/use-gsap';
+import { Reveal } from '@/components/site/animations/reveal';
+
+gsap.registerPlugin(ScrollTrigger);
 
 export function HowItWorks() {
   const [tab, setTab] = useState<'creators' | 'brands'>('creators');
+  const gridRef = useRef<HTMLDivElement>(null);
 
   const creatorSteps = [
     { icon: Calendar, title: 'Create a day', desc: 'Describe what you\'re doing — coding, traveling, cooking. Set 3 sponsorship slots with your own prices.' },
@@ -22,6 +27,32 @@ export function HowItWorks() {
   ];
 
   const steps = tab === 'creators' ? creatorSteps : brandSteps;
+
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+
+    const ctx = gsap.context(() => {
+      gsap.from(grid.children, {
+        y: 32,
+        opacity: 0,
+        scale: 0.96,
+        duration: 0.65,
+        ease: 'power3.out',
+        stagger: 0.08,
+        scrollTrigger: {
+          trigger: grid,
+          start: 'top 85%',
+          toggleActions: 'play none none reverse',
+        },
+      });
+    }, grid);
+
+    // A tab switch re-renders the cards; keep triggers accurate afterwards.
+    refreshScrollTriggers();
+
+    return () => ctx.revert();
+  }, [tab]);
 
   return (
     <section id="how-it-works" className="py-20 bg-secondary/20 border-y border-border/50">
@@ -61,10 +92,11 @@ export function HowItWorks() {
           </div>
         </div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div ref={gridRef} className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
           {steps.map((step, i) => (
             <div
               key={step.title}
+              data-anim
               className="group relative rounded-2xl border border-border bg-card p-6 transition-all hover:shadow-lg hover:-translate-y-1"
             >
               <div className="absolute top-6 right-6 text-5xl font-bold text-border/80 select-none">
