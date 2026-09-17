@@ -1,10 +1,8 @@
-import 'server-only';
-
 import type { User } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/server-supabase';
 
 /**
- * Profile provisioning.
+ * Profile provisioning. Server-only: uses the service-role client and bypasses RLS.
  *
  * Signup used to insert into `profiles` from the browser immediately after
  * `supabase.auth.signUp()`. Two things broke that:
@@ -154,8 +152,12 @@ export async function ensureCreatorProfileForProfileId(profileId: string): Promi
 
   const { error: insertError } = await client
     .from('creator_profiles')
-    .insert({ profile_id: profileId });
+    .insert({ profile_id: profileId })
+    .select('id')
+    .single();
 
+  // 23505 is the duplicate-key error a racing provision leaves behind; the row exists, so
+  // the caller's goal is met and there is nothing more to do.
   if (insertError && insertError.code !== '23505') {
     throw new Error(`Could not create a creator profile: ${insertError.message}`);
   }

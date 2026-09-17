@@ -190,12 +190,21 @@ function execute(
   // --- writes -------------------------------------------------------------
   if (write) {
     if (write.kind === 'insert') {
+      const insertedRows: Row[] = [];
       for (const row of write.rows ?? []) {
         const conflict = uniqueConflict(state, table, row);
         if (conflict) return { data: null, error: conflict };
-        state.database[table].push({ ...row });
+        // Generate the columns the real database would: `profiles` and `creator_profiles`
+        // both have `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`, and every table has a
+        // `created_at`. Without these a caller reading the id back gets undefined and the
+        // lookup for the child row silently matches nothing.
+        const stored = withGeneratedColumns(table, row);
+        state.database[table].push(stored);
+        insertedRows.push(stored);
       }
-      return { data: (write.rows ?? [])[0] ?? null, error: null };
+      // `.insert().select()` resolves to the stored rows so callers see server-generated
+      // columns; the whole row is returned, a superset of any requested column list.
+      return { data: insertedRows[0] ?? null, error: null };
     }
 
     if (write.kind === 'upsert') {
@@ -271,10 +280,41 @@ function matches(row: Row, filters: Extract<QueryStep, { kind: 'eq' | 'in' }>[])
   });
 }
 
+/** Tables with a generated `id` primary key (migration `20260903215330`). */
+const TABLES_WITH_GENERATED_ID = new Set(['profiles', 'creator_profiles', 'days', 'sponsorships', 'reviews', 'deliverables', 'sponsorship_slots', 'webhook_events']);
+
 /**
- * Tables whose uniqueness the fake enforces. `webhook_events` has a unique constraint on
- * `event_id` (contract §3.5): without it, a replayed delivery would look newly claimed and
- * the idempotency guard would be untestable.
+ * Fills in the columns Postgres generates on insert so a caller that reads the row back
+ * sees what it would in production. Deterministic ids keep tests stable and readable.
+ */
+function withGeneratedColumns(table: string, row: Row): Row {
+  const stored: Row = { ...row };
+  if (TABLES_WITH_GENERATED_ID.has(table) && stored.id === undefined) {
+    stored.id = `${table}-id-${statelessCounter(table)}`;
+  }
+  if (stored.created_at === undefined) {
+    stored.created_at = '2026-01-01T00:00:00.000Z';
+  }
+  return stored;
+}
+
+const idCounters = new Map<string, number>();
+
+function statelessCounter(table: string): number {
+  const next = (idCounters.get(table) ?? 0) + 1;
+  idCounters.set(table, next);
+  return next;
+}
+
+/**
+ * Tables whose uniqueness the fake enforces.
+ *  - `webhook_events` has a unique constraint on `event_id` (contract §3.5): without it, a
+ *    replayed delivery would look newly claimed and the idempotency guard would be
+ *    untestable.
+ *  - `profiles` has a unique `user_id` and `creator_profiles` a unique `profile_id`
+ *    (migration `20260903215330`). Profile provisioning relies on this: without it, a
+ *    retried signup or a returning Google user could not be distinguished from a first
+ *    creation, and the duplicate-key recovery path would be unreachable.
  *
  * Returns the PostgREST error a duplicate insert would raise, or null when the row is new.
  */
@@ -283,10 +323,19 @@ function uniqueConflict(
   table: string,
   row: Row,
 ): { code: string; message: string } | null {
-  if (table !== 'webhook_events') return null;
-  const eventId = row.event_id;
-  if (typeof eventId !== 'string') return null;
-  const exists = state.database[table].some((existing) => existing.event_id === eventId);
+  const uniqueColumn: string | null =
+    table === 'webhook_events'
+      ? 'event_id'
+      : table === 'profiles'
+        ? 'user_id'
+        : table === 'creator_profiles'
+          ? 'profile_id'
+          : null;
+
+  if (!uniqueColumn) return null;
+  const value = row[uniqueColumn];
+  if (typeof value !== 'string') return null;
+  const exists = state.database[table].some((existing) => existing[uniqueColumn] === value);
   return exists
     ? { code: '23505', message: 'duplicate key value violates unique constraint' }
     : null;
