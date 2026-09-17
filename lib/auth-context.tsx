@@ -15,6 +15,11 @@ type AuthContextType = {
   loading: boolean;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  /**
+   * Ensures a profile row exists for the signed-in user. Safe to call when one is
+   * already present; returns true once a profile is available.
+   */
+  ensureProfile: () => Promise<boolean>;
 };
 
 const AuthContext = createContext<AuthContextType>({
@@ -23,6 +28,7 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   signOut: async () => {},
   refreshProfile: async () => {},
+  ensureProfile: async () => false,
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -99,8 +105,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (user) await loadProfile(user.id);
   };
 
+  const ensureProfile = async () => {
+    if (profile) return true;
+    if (!user) return false;
+    // Ask the server to provision (idempotent), then re-read. Covers a Google user whose
+    // callback provisioning raced the client's first `getSession`, and a legacy account
+    // whose client-side insert was rejected by RLS before the server route existed.
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return false;
+
+      const response = await fetch('/api/auth/session', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return false;
+      const session = (await response.json()) as { profile: Profile | null };
+      if (session.profile) {
+        setProfile(session.profile);
+        return true;
+      }
+
+      // No row yet: provision on the server and re-read once more.
+      const provisionResponse = await fetch('/api/auth/provision', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!provisionResponse.ok) return false;
+      const provisioned = (await provisionResponse.json()) as { profile: Profile | null };
+      if (provisioned.profile) {
+        setProfile(provisioned.profile);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signOut, refreshProfile }}>
+    <AuthContext.Provider
+      value={{ user, profile, loading, signOut, refreshProfile, ensureProfile }}
+    >
       {children}
     </AuthContext.Provider>
   );
