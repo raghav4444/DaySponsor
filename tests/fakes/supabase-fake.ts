@@ -68,6 +68,17 @@ export function installFakeAdminClient(state: FakeSupabaseState): () => void {
   return () => getter.mockRestore();
 }
 
+export function installRpcHandler(
+  state: FakeSupabaseState,
+  name: string,
+  handler: (args: unknown) => unknown,
+): () => void {
+  state.rpcHandlers[name] = handler;
+  return () => {
+    delete state.rpcHandlers[name];
+  };
+}
+
 function buildFakeClient(state: FakeSupabaseState): SupabaseClient {
   const query = (table: string) => {
     const steps: QueryStep[] = [];
@@ -272,8 +283,8 @@ function matches(row: Row, filters: Extract<QueryStep, { kind: 'eq' | 'in' }>[])
 }
 
 /**
- * Tables whose uniqueness the fake enforces. `webhook_events` has a unique constraint on
- * `event_id` (contract §3.5): without it, a replayed delivery would look newly claimed and
+ * Tables whose uniqueness the fake enforces. `stripe_webhook_events` has a unique constraint on
+ * `stripe_event_id` (contract §3.5): without it, a replayed delivery would look newly claimed and
  * the idempotency guard would be untestable.
  *
  * Returns the PostgREST error a duplicate insert would raise, or null when the row is new.
@@ -283,10 +294,12 @@ function uniqueConflict(
   table: string,
   row: Row,
 ): { code: string; message: string } | null {
-  if (table !== 'webhook_events') return null;
-  const eventId = row.event_id;
-  if (typeof eventId !== 'string') return null;
-  const exists = state.database[table].some((existing) => existing.event_id === eventId);
+  if (table !== 'stripe_webhook_events') return null;
+  const stripeEventId = row.stripe_event_id;
+  if (typeof stripeEventId !== 'string') return null;
+  const exists = state.database[table].some(
+    (existing) => existing.stripe_event_id === stripeEventId,
+  );
   return exists
     ? { code: '23505', message: 'duplicate key value violates unique constraint' }
     : null;

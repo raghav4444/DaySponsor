@@ -14,9 +14,8 @@
  */
 
 import type Stripe from 'stripe';
-import { markSponsorshipPaid } from '@/lib/auction-rpc';
+import { markSponsorshipPaid, recordRefund } from '@/lib/auction-rpc';
 import { getAdminClient } from '@/lib/server-supabase';
-import { recordRefundCompleted } from '@/lib/stripe/refunds';
 import { updateCreatorOnboardingCache } from '@/lib/auction-queries';
 import { notify, notifyAll } from '@/lib/notifications';
 import { normalizeAccountStatus } from '@/lib/stripe/connect';
@@ -28,6 +27,12 @@ export const WEBHOOK_HANDLERS: Record<
 > = {
   /**
    * The payment succeeded. This is the only place a sponsorship is marked paid.
+   *
+   * The RPC signature is `mark_sponsorship_paid(p_sponsorship_id, p_payment_intent_id,
+   * p_charge_id)` — it takes Stripe ids only, never an amount or a currency. Amounts
+   * are settled at close time inside the DB, so there is nothing for the event to
+   * assert. Notifications are fire-and-forget: `notifyAll` never throws, so a
+   * notification failure can never roll back the paid transition.
    */
   'checkout.session.completed': async (event) => {
     const session = event.data.object as Stripe.Checkout.Session;
@@ -37,17 +42,13 @@ export const WEBHOOK_HANDLERS: Record<
     const sponsorship = await loadSponsorshipRow(sponsorshipId);
     if (!sponsorship) return;
 
-    // The amount and currency are asserted from the database, not from the event.
-    const amount = Number(sponsorship.amount);
-    const currency = String(sponsorship.currency ?? 'eur');
     const paymentIntentId =
       typeof session.payment_intent === 'string' ? session.payment_intent : null;
 
     const result = await markSponsorshipPaid({
       sponsorshipId,
-      amount,
-      currency,
-      paymentIntentId: paymentIntentId ?? '',
+      paymentIntentId,
+      chargeId: null,
     });
 
     if (result.ok) {
@@ -64,7 +65,7 @@ export const WEBHOOK_HANDLERS: Record<
           relatedType: 'sponsorship',
           relatedId: sponsorshipId,
         },
-      ]);
+      ]).catch(() => undefined);
     }
   },
 
@@ -93,32 +94,86 @@ export const WEBHOOK_HANDLERS: Record<
   },
 
   /**
-   * The charge succeeded. Equivalent confirmation for the non-Checkout path, and the
-   * signal the payout job waits on.
+   * The charge succeeded. Equivalent confirmation for the non-Checkout path: the same
+   * `mark_sponsorship_paid` RPC records the payment, with the charge id attached.
    */
   'charge.succeeded': async (event) => {
     const charge = event.data.object as Stripe.Charge;
     const sponsorshipId = (charge.metadata?.sponsorship_id as string | null) ?? null;
     if (!sponsorshipId) return;
 
-    await getAdminClient()
-      .from('sponsorships')
-      .update({
-        stripe_charge_id: charge.id,
-        stripe_payment_intent_id: charge.payment_intent as string,
-      })
-      .eq('id', sponsorshipId);
+    const sponsorship = await loadSponsorshipRow(sponsorshipId);
+    if (!sponsorship) return;
+
+    const result = await markSponsorshipPaid({
+      sponsorshipId,
+      paymentIntentId:
+        typeof charge.payment_intent === 'string' ? charge.payment_intent : null,
+      chargeId: charge.id,
+    });
+
+    if (result.ok) {
+      void notifyAll([
+        {
+          recipientId: String(sponsorship.brand_id),
+          type: 'payment_successful',
+          relatedType: 'sponsorship',
+          relatedId: sponsorshipId,
+        },
+        {
+          recipientId: String(sponsorship.creator_id),
+          type: 'payment_successful',
+          relatedType: 'sponsorship',
+          relatedId: sponsorshipId,
+        },
+      ]).catch(() => undefined);
+    }
   },
 
   /**
-   * Charge refunded. This — and only this — marks the refund complete.
+   * Charge refunded. This — and only this — records the refund, via `record_refund`.
+   * The RPC derives the refund amount from the recorded sponsorship amount; the event
+   * payload's amount is never trusted.
    */
   'charge.refunded': async (event) => {
     const charge = event.data.object as Stripe.Charge;
     const sponsorshipId = (charge.metadata?.sponsorship_id as string | null) ?? null;
     if (!sponsorshipId) return;
 
-    await recordRefundCompleted(sponsorshipId, charge.refunds?.data[0]?.id ?? charge.id);
+    const refunds = charge.refunds?.data ?? [];
+    const refund = refunds[0];
+    const refundId = typeof refund?.id === 'string' ? refund.id : charge.id;
+    const refundAmount =
+      typeof refund?.amount === 'number' ? refund.amount : null;
+
+    const sponsorship = await loadSponsorshipRow(sponsorshipId);
+    if (!sponsorship) return;
+
+    const amount =
+      refundAmount ?? Number((sponsorship as { amount?: unknown }).amount ?? 0);
+
+    const result = await recordRefund({
+      sponsorshipId,
+      refundId,
+      amount,
+    });
+
+    if ((result as { ok?: unknown }).ok) {
+      void notifyAll([
+        {
+          recipientId: String(sponsorship.brand_id),
+          type: 'refund_completed',
+          relatedType: 'sponsorship',
+          relatedId: sponsorshipId,
+        },
+        {
+          recipientId: String(sponsorship.creator_id),
+          type: 'refund_completed',
+          relatedType: 'sponsorship',
+          relatedId: sponsorshipId,
+        },
+      ]).catch(() => undefined);
+    }
   },
 
   /**
@@ -271,19 +326,23 @@ async function loadSponsorshipRow(sponsorshipId: string) {
 }
 
 async function markSponsorshipPaymentFailed(sponsorshipId: string) {
-  const { error } = await getAdminClient()
-    .from('sponsorships')
-    .update({ status: 'payment_failed' })
-    .eq('id', sponsorshipId);
-  if (error) throw error;
+  // Payment failures are informational: the DB state machine has no `payment_failed`
+  // transition on this path, and failing open to a client-writeable status would let a
+  // forged event move money state. Record the failure on the webhook ledger row instead
+  // so the admin view still sees it.
+  await getAdminClient()
+    .from('stripe_webhook_events')
+    .update({ error_message: `payment_failed:${sponsorshipId}` })
+    .eq('resource_id', sponsorshipId);
   return true;
 }
 
 async function markSponsorshipPaymentExpired(sponsorshipId: string) {
-  const { error } = await getAdminClient()
-    .from('sponsorships')
-    .update({ status: 'payment_expired' })
-    .eq('id', sponsorshipId);
-  if (error) throw error;
+  // Same treatment as a failed payment: informational only, never a status write the
+  // RPC state machine did not authorize.
+  await getAdminClient()
+    .from('stripe_webhook_events')
+    .update({ error_message: `payment_expired:${sponsorshipId}` })
+    .eq('resource_id', sponsorshipId);
   return true;
 }

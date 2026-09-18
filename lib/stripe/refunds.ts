@@ -58,18 +58,24 @@ export async function assessRefund(sponsorshipId: string): Promise<RefundAssessm
     });
   }
 
-  const refundStatus = String(sponsorship.refund_status ?? 'none');
-  const payoutStatus = String(sponsorship.payout_status ?? 'none');
+  const paymentStatus = String(sponsorship.payment_status ?? 'pending');
+  const payoutStatus = String(sponsorship.payout_status ?? 'pending');
   const status = String(sponsorship.status);
   const amount = Number(sponsorship.amount);
   const currency = String(sponsorship.currency ?? getPlatformConfig().currency);
   // The schema records a payment intent id; a charge id is stored once `charge.succeeded`
   // lands. Refunds may be created from either.
-  const chargeId = (sponsorship.stripe_payment_intent_id as string | null) ?? null;
+  const chargeId =
+    (sponsorship.stripe_charge_id as string | null) ??
+    (sponsorship.stripe_payment_intent_id as string | null) ??
+    null;
   const transferId = (sponsorship.stripe_transfer_id as string | null) ?? null;
+  const refundId = (sponsorship.stripe_refund_id as string | null) ?? null;
 
-  // Idempotent: an already-completed refund is a success, not an error.
-  if (refundStatus === 'completed') {
+  // Idempotent: an already-recorded refund is a success, not an error. The DB records
+  // the refund via `record_refund` (webhook): `stripe_refund_id` set and payment
+  // `refunded`, or `status = 'refunded'`.
+  if (refundId || paymentStatus === 'refunded' || status === 'refunded') {
     return {
       path: 'already_refunded',
       allowed: false,
@@ -83,7 +89,12 @@ export async function assessRefund(sponsorshipId: string): Promise<RefundAssessm
   }
 
   // Nothing was ever collected, so there is nothing to refund.
-  if (status === 'pending' || status === 'cancelled' || status === 'payment_failed') {
+  if (
+    paymentStatus !== 'paid' ||
+    status === 'payment_pending' ||
+    status === 'pending' ||
+    status === 'cancelled'
+  ) {
     return {
       path: 'not_paid',
       allowed: false,
@@ -97,7 +108,7 @@ export async function assessRefund(sponsorshipId: string): Promise<RefundAssessm
   }
 
   // Money has already reached the creator: reversal path, admin-only.
-  if (payoutStatus === 'released' || payoutStatus === 'pending') {
+  if (payoutStatus === 'released') {
     return {
       path: 'post_payout',
       allowed: true,
@@ -322,7 +333,8 @@ export async function blockPayout(sponsorshipId: string, reason: string) {
 
 /**
  * Records the final refund state. Called only by the webhook once Stripe confirms the
- * refund completed — never by the request path.
+ * refund completed — never by the request path. Delegates to the `record_refund` RPC
+ * so the guarded payout/ledger columns move atomically.
  */
 export async function recordRefundCompleted(sponsorshipId: string, refundId: string) {
   const sponsorship = await loadSponsorshipForPayout(sponsorshipId);
@@ -331,19 +343,10 @@ export async function recordRefundCompleted(sponsorshipId: string, refundId: str
   const brandId = String(sponsorship?.brand_id ?? '');
   const creatorId = String(sponsorship?.creator_id ?? '');
 
-  const { error } = await getAdminClient()
-    .from('sponsorships')
-    .update({
-      stripe_refund_id: refundId,
-      refund_status: 'completed',
-      status: 'refunded',
-      // A refunded sponsorship must never be paid out.
-      payout_hold: true,
-      payout_hold_reason: 'refunded',
-    })
-    .eq('id', sponsorshipId);
-
-  if (error) throw error;
+  // The RPC is the only writer of the guarded refund columns (migration 0003 forbids
+  // client writes). It derives the refund amount from the recorded sponsorship amount.
+  const { recordRefund } = await import('@/lib/auction-rpc');
+  await recordRefund({ sponsorshipId, refundId, amount });
 
   // Notify both parties. Fire-and-forget; never rolls back the recorded refund.
   const refundNotifications: NotificationInput[] = [
@@ -372,16 +375,17 @@ export async function recordRefundCompleted(sponsorshipId: string, refundId: str
 }
 
 /**
- * Records a failed refund attempt, so an admin can see it in the dashboard.
+ * Records a failed refund attempt on the webhook ledger, so an admin can see it in the
+ * dashboard. The guarded `sponsorships` payout columns are RPC-owned and are never
+ * written directly here.
  */
 export async function recordRefundFailure(sponsorshipId: string, reason: string) {
   const { error } = await getAdminClient()
-    .from('sponsorships')
+    .from('stripe_webhook_events')
     .update({
-      refund_status: 'failed',
-      payout_hold_reason: reason,
+      error_message: `refund_failed:${sponsorshipId}:${reason}`,
     })
-    .eq('id', sponsorshipId);
+    .eq('resource_id', sponsorshipId);
 
   if (error) throw error;
   return true;

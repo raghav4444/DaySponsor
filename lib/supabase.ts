@@ -139,6 +139,17 @@ export type Sponsorship = {
   status: 'pending' | 'paid' | 'product_shipped' | 'product_received' | 'day_completed' | 'review_pending' | 'completed' | 'cancelled' | 'refunded';
   stripe_payment_intent_id: string | null;
   stripe_checkout_session_id: string | null;
+  stripe_transfer_id: string | null;
+  stripe_refund_id: string | null;
+  payout_status: 'pending' | 'eligible' | 'released' | 'failed' | 'cancelled';
+  payout_hold: boolean | null;
+  payout_hold_reason: string | null;
+  payout_released_at: string | null;
+  payment_due_at: string | null;
+  paid_at: string | null;
+  payment_status: 'pending' | 'paid' | 'failed' | 'refunded';
+  refund_amount: number | null;
+  refunded_at: string | null;
   created_at: string;
   updated_at: string;
 };

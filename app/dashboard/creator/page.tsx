@@ -39,8 +39,9 @@ type SponsorshipWithBrand = {
   payout_status: string | null;
   payout_released_at: string | null;
   stripe_transfer_id: string | null;
-  refund_status: string | null;
-  payment_deadline_at: string | null;
+  refund_amount: number | null;
+  payment_status: string | null;
+  payment_due_at: string | null;
   profiles: { name: string; username: string | null } | null;
 };
 
@@ -214,8 +215,7 @@ export default function CreatorDashboard() {
     (s) =>
       s.status === 'paid' &&
       s.payout_status !== 'released' &&
-      s.refund_status !== 'succeeded' &&
-      s.refund_status !== 'pending',
+      s.payment_status !== 'refunded',
   );
   const pendingAmount = pendingPayout.reduce((sum, s) => sum + s.creator_amount, 0);
 
@@ -568,7 +568,7 @@ function DayRow({ day, slots }: { day: DayWithSlots; slots: SlotWithAuction[] })
 
   const openAuctions = slots.filter((s) => s.auction_status === 'open');
   const closedAuctions = slots.filter((s) =>
-    ['closed', 'awaiting_payment', 'sold', 'payment_pending'].includes(s.auction_status ?? ''),
+    ['closed', 'awaiting_payment', 'paid', 'completed', 'cancelled'].includes(s.auction_status ?? ''),
   );
   const highestOpen = openAuctions.reduce(
     (max, s) => Math.max(max, Number(s.current_highest_bid ?? 0)),
@@ -636,7 +636,6 @@ function SlotAuctionLine({ slot }: { slot: SlotWithAuction }) {
   const currency = slot.currency ?? 'eur';
   const starting = Number(slot.starting_price ?? 0);
   const highest = Number(slot.current_highest_bid ?? 0);
-  const bids = Number(slot.bid_count ?? 0);
   const closed = slot.auction_status !== 'open';
 
   return (
@@ -651,9 +650,6 @@ function SlotAuctionLine({ slot }: { slot: SlotWithAuction }) {
         </span>
         <span>
           Highest <span className="font-semibold text-foreground">{formatMinorUnits(highest, currency)}</span>
-        </span>
-        <span>
-          {bids} bid{bids === 1 ? '' : 's'}
         </span>
         {slot.auction_ends_at && !closed && (
           <span>
@@ -720,8 +716,8 @@ function SponsorshipRow({ sp }: { sp: SponsorshipWithBrand }) {
 
       <div className="mt-3 pt-3 border-t border-border flex flex-wrap items-center gap-3">
         <StatusBadge status={sp.payout_status} kind="payout" />
-        {sp.refund_status && sp.refund_status !== 'none' && (
-          <StatusBadge status={sp.refund_status} kind="refund" />
+        {sp.refund_amount != null && sp.refund_amount > 0 && (
+          <StatusBadge status="refunded" kind="refund" />
         )}
         {sp.status === 'pending' && (
           <span className="text-xs text-amber-600" data-testid="unpaid-notice">

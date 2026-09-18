@@ -56,7 +56,6 @@ export function AuctionPanel({
   const currency = slot.currency ?? 'eur';
   const startingBid = Number(slot.starting_price ?? 0);
   const highest = Number(slot.current_highest_bid ?? 0);
-  const bidCount = Number(slot.bid_count ?? 0);
   const isOpen = slot.auction_status === 'open' && !countdown.elapsed;
 
   // "Am I winning" is derived from the caller's own bid row, never from a list of bidders.
@@ -145,7 +144,6 @@ export function AuctionPanel({
           currency={currency}
           startingBid={startingBid}
           highest={highest}
-          bidCount={bidCount}
         />
         <p className="text-xs text-muted-foreground">
           {profile ? 'Switch to a brand account to bid.' : 'Sign in as a brand to place a bid.'}
@@ -174,7 +172,6 @@ export function AuctionPanel({
         currency={currency}
         startingBid={startingBid}
         highest={highest}
-        bidCount={bidCount}
       />
 
       {slot.description && (
@@ -263,15 +260,13 @@ function BidFacts({
   currency,
   startingBid,
   highest,
-  bidCount,
 }: {
   currency: string;
   startingBid: number;
   highest: number;
-  bidCount: number;
 }) {
   return (
-    <div className="grid grid-cols-3 gap-2 text-center">
+    <div className="grid grid-cols-2 gap-2 text-center">
       <div className="rounded-lg bg-secondary/50 py-2 px-1">
         <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Starting</p>
         <p className="text-sm font-semibold">{formatMinorUnits(startingBid, currency)}</p>
@@ -282,10 +277,6 @@ function BidFacts({
           <TrendingUp className="h-3 w-3" />
           {formatMinorUnits(highest, currency)}
         </p>
-      </div>
-      <div className="rounded-lg bg-secondary/50 py-2 px-1">
-        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Bids</p>
-        <p className="text-sm font-semibold">{bidCount}</p>
       </div>
     </div>
   );
@@ -311,7 +302,6 @@ function ClosedSlotSummary({
         currency={currency}
         startingBid={Number(slot.starting_price ?? 0)}
         highest={Number(slot.current_highest_bid ?? 0)}
-        bidCount={Number(slot.bid_count ?? 0)}
       />
       {isWinning ? (
         <p className="text-sm font-medium text-accent" data-testid="won-notice">

@@ -434,7 +434,7 @@ function BidList({
       {slots.map((slot) => {
         const myBid = myBids.get(slot.id);
         const currency = slot.currency ?? 'eur';
-        const isWinning = myBid?.status === 'winning' || myBid?.status === 'won';
+        const isWinning = myBid?.status === 'winner';
 
         return (
           <div
@@ -454,9 +454,6 @@ function BidList({
                 <div className="text-right">
                   <p className="font-bold text-lg">
                     {formatMinorUnits(Number(slot.current_highest_bid ?? 0), currency)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {Number(slot.bid_count ?? 0)} bid{slot.bid_count === 1 ? '' : 's'}
                   </p>
                 </div>
                 <StatusBadge status={slot.auction_status} kind="auction" />
@@ -518,7 +515,7 @@ function PaymentList({
       {rows.map((row) => {
         const currency = row.currency ?? 'eur';
         const payable = canOfferPayment(row);
-        const deadline = row.payment_deadline_at;
+        const deadline = row.payment_due_at;
         const deadlineStr = deadline
           ? new Date(deadline).toLocaleString('en-US', {
               month: 'short',
@@ -660,9 +657,10 @@ function FailedList({ rows }: { rows: BrandSponsorshipRow[] }) {
                 <StatusBadge status={row.status} kind="sponsorship" />
               </div>
             </div>
-            {row.refund_status && row.refund_status !== 'none' && (
+            {row.payment_status === 'refunded' && (
               <p className="mt-3 text-xs text-muted-foreground">
-                Refund {row.refund_status}. {row.stripe_refund_id ? 'Reference ' + row.stripe_refund_id : ''}
+                Refunded. {row.refund_amount ? formatMinorUnits(row.refund_amount, currency) + ' refunded' : ''}
+                {row.stripe_refund_id ? ` · Ref: ${row.stripe_refund_id}` : ''}
               </p>
             )}
           </div>

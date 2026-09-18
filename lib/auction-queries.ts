@@ -1,15 +1,14 @@
 /**
  * Auction data-access layer.
  *
- * ️ PARTIALLY TEMPORARY. See `docs/auction-implementation-contract.md`.
+ * Single funnel through which the application reads auction state against the merged
+ * Engineer A schema (`supabase/migrations/20260916*`, contract
+ * `docs/auction-implementation-contract.md`).
  *
- * The auction schema is not migrated yet. This module is the **single funnel** through
- * which the application reads auction state, so that when Engineer A's migration and
- * generated types land, this is the only file that has to change.
- *
- * RPC calls go through `lib/auction-rpc.ts`, which currently delegates to the safe
- * in-memory implementation in `lib/auction-rpc-stubs.ts`. Delete those two stubs and
- * point `lib/auction-rpc.ts` at the real `.rpc(...)` calls when the migration merges.
+ * Table names: `bids` (NOT `auction_bids`), `stripe_webhook_events`
+ * (NOT `webhook_events`). The public leader ask is exposed through the
+ * `public.auction_leader` view (no `brand_id` column); the base `bids` table is never
+ * read for another brand's rows.
  */
 
 import { getAdminClient } from '@/lib/server-supabase';
@@ -21,28 +20,37 @@ import {
 } from '@/lib/auction-types';
 import type { Slot } from '@/lib/supabase';
 
-/** Auction fields the browser is allowed to read for a listed slot. */
+/** Auction columns the browser is allowed to read for a listed slot. */
 export const PUBLIC_SLOT_AUCTION_COLUMNS = [
   'starting_price',
   'auction_ends_at',
   'auction_status',
   'current_highest_bid',
-  'bid_count',
+  'current_highest_bid_id',
+  'winning_bid_id',
+  'payment_due_at',
+  'closed_at',
+  'winner_attempt_count',
   'currency',
 ] as const;
 
 /**
  * Slot with the auction columns attached.
  *
- * `current_highest_bidder_id` is deliberately absent from the public shape: losing brand
- * identities must not be exposed.
+ * The leader's `brand_id` is deliberately absent: it is not a column on the slot and
+ * must never be read from the base `bids` table for another brand — the public ask
+ * comes from the `auction_leader` view instead.
  */
 export type SlotWithAuction = Slot & {
-  starting_price: number;
+  starting_price: number | null;
   auction_ends_at: string | null;
   auction_status: AuctionStatus;
-  current_highest_bid: number;
-  bid_count: number;
+  current_highest_bid: number | null;
+  current_highest_bid_id: string | null;
+  winning_bid_id: string | null;
+  payment_due_at: string | null;
+  closed_at: string | null;
+  winner_attempt_count: number;
   currency: string;
   /** Derived: is the given brand the current high bidder? */
   is_winning?: boolean;
@@ -112,19 +120,19 @@ export async function loadMyBidsForSlots(
   if (slotIds.length === 0) return new Map();
 
   const { data, error } = await getAdminClient()
-    .from('auction_bids')
+    .from('bids')
     .select('*')
     .eq('brand_id', brandProfileId)
     .in('slot_id', slotIds)
-    .order('placed_at', { ascending: false });
+    .order('created_at', { ascending: false });
 
   if (error || !data) return new Map();
 
-  // Keep the caller's most recent active bid per slot.
+  // Keep the caller's most recent bid per slot.
   const bySlot = new Map<string, AuctionBid>();
   for (const row of data as AuctionBid[]) {
     const existing = bySlot.get(row.slot_id);
-    if (!existing || new Date(row.placed_at) > new Date(existing.placed_at)) {
+    if (!existing || new Date(row.created_at) > new Date(existing.created_at)) {
       bySlot.set(row.slot_id, row);
     }
   }
@@ -138,22 +146,21 @@ export async function loadMyBidsForSlots(
  */
 export async function loadBidForCheckout(bidId: string) {
   const { data, error } = await getAdminClient()
-    .from('auction_bids')
+    .from('bids')
     .select(
       `
       id,
       slot_id,
       brand_id,
-      creator_id,
       amount,
       currency,
       status,
-      stripe_checkout_session_id,
-      payment_deadline_at,
-      placed_at,
+      created_at,
+      updated_at,
       slot:sponsorship_slots(
         id, day_id, tier, is_available, starting_price, auction_ends_at,
-        auction_status, current_highest_bid, current_highest_bidder_id, bid_count, currency
+        auction_status, current_highest_bid, current_highest_bid_id,
+        winning_bid_id, payment_due_at, closed_at, winner_attempt_count, currency
       )
     `,
     )
@@ -173,10 +180,12 @@ export async function loadSponsorshipForPayout(sponsorshipId: string) {
     .select(
       `
       id, slot_id, brand_id, creator_id, amount, platform_fee, creator_amount,
-      status, stripe_payment_intent_id, stripe_checkout_session_id, created_at, updated_at,
-      winning_bid_id, currency, payment_deadline_at, paid_at,
-      stripe_transfer_id, payout_status, payout_released_at,
-      stripe_refund_id, refund_status, payout_hold, payout_hold_reason
+      status, stripe_payment_intent_id, stripe_checkout_session_id, stripe_charge_id,
+      created_at, updated_at,
+      winning_bid_id, currency, payment_status, payment_due_at, paid_at,
+      refund_amount, refunded_at,
+      stripe_transfer_id, payout_status, payout_eligible_at, payout_released_at,
+      stripe_refund_id, payout_hold, payout_hold_reason
     `,
     )
     .eq('id', sponsorshipId)
@@ -187,18 +196,20 @@ export async function loadSponsorshipForPayout(sponsorshipId: string) {
 }
 
 /**
- * Loads the winning (paying) bid for a slot, if any.
+ * Loads the paying bid for a slot, if any.
  *
- * At most one can exist thanks to the `uniq_slot_paying_bid` index
- * (contract §3.6). `.limit(1)` plus the guard makes that explicit.
+ * At most one can exist thanks to the `sponsorships_one_active_per_slot` index plus
+ * the `sponsorships_winning_bid_unique` index (contract §1). `.limit(1)` plus the
+ * guard makes that explicit.
  */
 export async function loadWinningBidForSlot(slotId: string): Promise<AuctionBid | null> {
   const { data, error } = await getAdminClient()
-    .from('auction_bids')
+    .from('bids')
     .select('*')
     .eq('slot_id', slotId)
-    .in('status', ['winning', 'payment_pending'])
+    .in('status', ['payment_pending', 'paid'])
     .order('amount', { ascending: false })
+    .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle();
 
@@ -212,7 +223,7 @@ export async function loadOpenSponsorshipForSlot(slotId: string) {
     .from('sponsorships')
     .select('*')
     .eq('slot_id', slotId)
-    .in('status', ['pending', 'paid'])
+    .in('status', ['payment_pending', 'pending', 'paid'])
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -229,14 +240,14 @@ export async function recordCheckoutSession(
   sponsorshipId: string,
   checkoutSessionId: string,
   paymentIntentId: string | null,
-  paymentDeadlineAt: string | null,
+  paymentDueAt: string | null,
 ) {
   const { error } = await getAdminClient()
     .from('sponsorships')
     .update({
       stripe_checkout_session_id: checkoutSessionId,
       stripe_payment_intent_id: paymentIntentId,
-      payment_deadline_at: paymentDeadlineAt,
+      payment_due_at: paymentDueAt,
     })
     .eq('id', sponsorshipId);
 

@@ -2,53 +2,43 @@
  * Webhook event idempotency.
  *
  * Stripe can deliver the same webhook event more than once (at-least-once delivery). The
- * handler must process each event exactly once. This module records processed event ids:
+ * handler must process each event exactly once. This module records processed event ids
+ * in the `stripe_webhook_events` table (contract §1) via the service-role client,
+ * which bypasses the deliberately policy-free RLS on that table.
  *
- *  - In production, in the `webhook_events` table (Engineer A's schema, contract §3.5),
- *    via a service-role client.
- *  - Until that migration merges, degraded to an in-process Set scoped to the server
- *    instance. The Set is not durable across cold starts, so a rare duplicate may slip
- *    through in dev — every handler beneath it is nevertheless idempotent by design.
- *
- * Recording a processed event is a non-financial side effect, so a failure to record must
- * never surface as a 500 to Stripe (which would trigger a retry that may double-process).
- * We therefore *always* record optimistically and treat duplicate detection as best-effort
- * in the fallback mode.
+ * The insert is the claim: the unique index on `stripe_event_id` turns a replayed
+ * delivery into a `23505` conflict, which the caller treats as "already handled".
+ * Recording a processed event is a non-financial side effect, so an unexpected failure
+ * to record must never surface as a 500 to Stripe (which would trigger a retry that
+ * may double-process). We therefore optimistically treat unknown errors as new claims
+ * and let the independently-idempotent RPCs converge on re-delivery.
  */
 
 import { getAdminClient } from '@/lib/server-supabase';
 
-// PostgREST error code for a missing table/function.
-const TABLE_MISSING = 'PGRST205';
-
-/** In-process duplicate cache (fallback until the table exists). */
-const processedInMemory = new Set<string>();
-
-function isTableMissing(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const code = (error as { code?: string }).code;
-  if (code === TABLE_MISSING) return true;
-  const message = String((error as { message?: string }).message ?? '');
-  return /relation .* does not exist|table .* does not exist/i.test(message);
-}
-
 /**
  * Records an event as processed. Returns true when this event was newly recorded (i.e.
  * should be processed), false when it was already processed.
+ *
+ * `payload` / `eventType` are stored for the admin audit view; the claim itself is the
+ * `stripe_event_id` unique index.
  */
-export async function claimWebhookEvent(eventId: string): Promise<boolean> {
-  if (processedInMemory.has(eventId)) return false;
-
+export async function claimWebhookEvent(
+  eventId: string,
+  params?: { eventType?: string | null; resourceId?: string | null; payload?: unknown },
+): Promise<boolean> {
   try {
-    const { error } = await getAdminClient().from('webhook_events').insert({
-      event_id: eventId,
-      processed_at: new Date().toISOString(),
-    });
+    const { error } = await getAdminClient()
+      .from('stripe_webhook_events')
+      .insert({
+        stripe_event_id: eventId,
+        event_type: params?.eventType ?? 'unknown',
+        resource_id: params?.resourceId ?? null,
+        payload: (params?.payload ?? {}) as Record<string, unknown>,
+      })
+      .select()
+      .single();
     if (error) {
-      if (isTableMissing(error)) {
-        // Table not migrated yet: fall back to the in-memory cache.
-        return claimInMemory(eventId);
-      }
       if (error.code === '23505') {
         // Unique constraint: already processed. Safe to skip.
         return false;
@@ -62,7 +52,6 @@ export async function claimWebhookEvent(eventId: string): Promise<boolean> {
     }
     return true;
   } catch (error) {
-    processedInMemory.add(eventId);
     console.error('[webhook] failed to claim event (caught)', {
       event_id: eventId,
       error_message: error instanceof Error ? error.message : 'unknown error',
@@ -71,9 +60,26 @@ export async function claimWebhookEvent(eventId: string): Promise<boolean> {
   }
 }
 
-/** In-memory claim with a duplicate guard. */
-function claimInMemory(eventId: string): boolean {
-  if (processedInMemory.has(eventId)) return false;
-  processedInMemory.add(eventId);
-  return true;
+/**
+ * Marks a claimed event processed (or failed) so the admin view can reconcile
+ * Stripe's delivery log against local state.
+ */
+export async function settleWebhookEvent(
+  eventId: string,
+  params?: { errorMessage?: string | null },
+): Promise<void> {
+  try {
+    await getAdminClient()
+      .from('stripe_webhook_events')
+      .update({
+        processed_at: new Date().toISOString(),
+        error_message: params?.errorMessage ?? null,
+      })
+      .eq('stripe_event_id', eventId);
+  } catch (error) {
+    console.error('[webhook] failed to settle event', {
+      event_id: eventId,
+      error_message: error instanceof Error ? error.message : 'unknown error',
+    });
+  }
 }
