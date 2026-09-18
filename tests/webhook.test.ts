@@ -25,15 +25,10 @@ import {
 import {
   createFakeSupabaseState,
   installFakeAdminClient,
+  installRpcHandler,
   seedDatabase,
   type FakeSupabaseState,
 } from './fakes/supabase-fake';
-import {
-  resetStubStore,
-  stubRegisterSponsorship,
-  stubGetSponsorship,
-} from '@/lib/auction-rpc-stubs';
-
 const SPONSORSHIP_ID = 'sp-1';
 const CREATOR_ID = 'creator-1';
 const BRAND_ID = 'brand-1';
@@ -70,20 +65,12 @@ function seedPaidSponsorship(overrides: Record<string, unknown> = {}) {
         stripe_payment_intent_id: null,
         stripe_checkout_session_id: null,
         stripe_transfer_id: null,
-        payout_status: 'none',
-        refund_status: 'none',
+        payout_status: 'pending',
         payout_hold: false,
         winning_bid_id: 'bid-1',
         ...overrides,
       },
     ],
-  });
-  // The amount the `mark_sponsorship_paid` RPC re-checks against. The unmigrated database
-  // falls back to the stub, whose own store is separate from the table.
-  stubRegisterSponsorship({
-    id: SPONSORSHIP_ID,
-    slotId: 'slot-1',
-    amount: Number(overrides.amount ?? 500),
   });
 }
 
@@ -109,7 +96,24 @@ beforeEach(() => {
 
   supabaseState = createFakeSupabaseState();
   restoreSupabase = installFakeAdminClient(supabaseState);
-  resetStubStore();
+  installRpcHandler(supabaseState, 'mark_sponsorship_paid', (args) => {
+    const input = args as {
+      p_sponsorship_id: string;
+      p_payment_intent_id: string | null;
+      p_charge_id: string | null;
+    };
+    const row = supabaseState.database.sponsorships.find((item) => item.id === input.p_sponsorship_id);
+    if (row) {
+      Object.assign(row, {
+        status: 'paid',
+        payment_status: 'paid',
+        paid_at: new Date().toISOString(),
+        stripe_payment_intent_id: input.p_payment_intent_id,
+        stripe_charge_id: input.p_charge_id,
+      });
+    }
+    return { ok: true, error: null };
+  });
 });
 
 afterEach(() => {

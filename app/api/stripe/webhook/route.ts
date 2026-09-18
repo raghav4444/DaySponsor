@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getStripe, getWebhookSecret } from '@/lib/stripe/server';
-import { claimWebhookEvent } from '@/lib/stripe/webhook-events';
+import { claimWebhookEvent, settleWebhookEvent } from '@/lib/stripe/webhook-events';
 import { dispatchWebhookEvent } from '@/lib/stripe/webhook-handlers';
 
 /**
@@ -55,8 +55,14 @@ export async function POST(request: Request) {
     );
   }
 
-  // 3. Idempotency: claim the event id.
-  const shouldProcess = await claimWebhookEvent(event.id);
+  // 3. Idempotency: claim the event id. The claim stores the type + payload for the
+  // admin audit view; a replayed id hits the unique index and is skipped below.
+  const resourceId = resourceIdForEvent(event);
+  const shouldProcess = await claimWebhookEvent(event.id, {
+    eventType: event.type,
+    resourceId,
+    payload: event as unknown as Record<string, unknown>,
+  });
 
   // 4. Already processed → 2xx, no work. Stripe considers the delivery a success.
   if (!shouldProcess) {
@@ -66,6 +72,7 @@ export async function POST(request: Request) {
   // 5. Dispatch.
   try {
     const outcome = await dispatchWebhookEvent(event);
+    await settleWebhookEvent(event.id);
 
     if (outcome === 'ignored') {
       // An event type we do not act on. Acknowledge so Stripe stops retrying it.
@@ -95,11 +102,27 @@ export async function POST(request: Request) {
 
     // 7. Unprocessable: acknowledge so Stripe does not retry forever. The event id was
     //    already claimed, so a redelivery would not help.
+    await settleWebhookEvent(event.id, { errorMessage: message });
     return NextResponse.json(
       { received: true, handled: false, failed: true },
       { status: 200 },
     );
   }
+}
+
+/**
+ * Best-effort resource id for the ledger row (sponsorship / account / charge id when
+ * the event carries one). Used only for the admin audit view — never for auth.
+ */
+function resourceIdForEvent(event: import('stripe').Stripe.Event): string | null {
+  const object = (event.data?.object ?? {}) as Record<string, unknown>;
+  const metadata = (object.metadata ?? {}) as Record<string, unknown>;
+  for (const key of ['sponsorship_id', 'creator_profile_id']) {
+    const value = metadata[key];
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  const id = object.id;
+  return typeof id === 'string' ? id : null;
 }
 
 /**

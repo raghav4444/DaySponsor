@@ -83,7 +83,7 @@ export default function DayDetailPage() {
           return {
             ...slot,
             my_bid: myBid,
-            is_winning: Boolean(myBid && (myBid.status === 'winning' || myBid.status === 'won')),
+            is_winning: Boolean(myBid && myBid.status === 'winner'),
           };
         }),
       );

@@ -206,7 +206,7 @@ export function createFakeStripe(state: FakeStripeState): Stripe {
         const session = state.checkoutSessions.find((s) => s.payment_intent === id);
         return {
           id,
-          status: session ? 'succeeded' : 'requires_payment_method',
+          status: session || id === 'pi_existing' ? 'succeeded' : 'requires_payment_method',
           amount: session?.amount_total ?? 0,
           currency: session?.currency ?? 'eur',
         };

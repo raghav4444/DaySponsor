@@ -67,22 +67,22 @@ export async function loadBrandBidSlots(
       id, day_id, tier, description,
       ${PUBLIC_AUCTION_SELECT}
       days!inner(id, title, day_date, location, category),
-      auction_bids!inner(id, amount, status, created_at, slot_id, brand_id)
+      bids!inner(id, amount, status, created_at, slot_id, brand_id)
       `,
     )
-    .eq('auction_bids.brand_id', brandProfileId)
-    .order('auction_bids.created_at', { ascending: false })
+    .eq('bids.brand_id', brandProfileId)
+    .order('bids.created_at', { ascending: false })
     .limit(40);
 
   if (error || !data) return { slots: [], myBids: new Map() };
 
   const myBids = new Map<string, AuctionBid>();
-  const rows = (data as unknown as Array<BrandSlotRow & { auction_bids: AuctionBid[] }>).map(
+  const rows = (data as unknown as Array<BrandSlotRow & { bids: AuctionBid[] }>).map(
     (row) => {
       // Take the caller's most recent bid for the slot.
-      const bid = row.auction_bids?.[0] ?? null;
+      const bid = row.bids?.[0] ?? null;
       if (bid) myBids.set(row.id, bid);
-      const { auction_bids: _dropped, ...slot } = row;
+      const { bids: _dropped, ...slot } = row;
       return slot;
     },
   );
@@ -92,7 +92,7 @@ export async function loadBrandBidSlots(
 
 /** The auction columns selected on every public slot read. */
 const PUBLIC_AUCTION_SELECT =
-  'starting_price, current_highest_bid, bid_count, auction_ends_at, auction_status, currency';
+  'starting_price, current_highest_bid, auction_ends_at, auction_status, currency';
 
 /**
  * The brand's sponsorships, newest first, with the day and the creator.
@@ -107,8 +107,9 @@ export async function loadBrandSponsorships(
       `
       id, slot_id, brand_id, creator_id, status, amount, platform_fee, creator_amount,
       currency, stripe_payment_intent_id, stripe_checkout_session_id,
-      stripe_transfer_id, stripe_refund_id, payout_status, refund_status,
-      payment_deadline_at, paid_at, created_at,
+      stripe_transfer_id, stripe_refund_id, payout_status,
+      payment_due_at, paid_at, created_at,
+      refund_amount, refunded_at,
       days!inner(id, title, day_date, location, category),
       creator_profiles(profile_id, occupation),
       profiles!sponsorships_creator_id_fkey(name, username)
@@ -201,11 +202,11 @@ export function groupBidSlots<T extends BrandSlotRow>(
     const auctionStatus = row.auction_status ?? 'open';
 
     if (auctionStatus === 'open' || auctionStatus === 'awaiting_payment') {
-      if (status === 'winning' || status === 'won') buckets.won.push(row);
-      else if (status === 'lost' || status === 'expired') buckets.lost.push(row);
+      if (status === 'winner' || status === 'paid') buckets.won.push(row);
+      else if (status === 'outbid' || status === 'cancelled' || status === 'failed') buckets.lost.push(row);
       else buckets.active.push(row);
-    } else if (auctionStatus === 'sold' || auctionStatus === 'expired' || auctionStatus === 'cancelled') {
-      if (status === 'won' || status === 'winning') buckets.won.push(row);
+    } else if (auctionStatus === 'closed' || auctionStatus === 'paid' || auctionStatus === 'completed' || auctionStatus === 'cancelled') {
+      if (status === 'winner' || status === 'paid') buckets.won.push(row);
       else buckets.lost.push(row);
     } else {
       buckets.active.push(row);
