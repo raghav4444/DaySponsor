@@ -12,14 +12,41 @@
  */
 
 import { runCronJob } from '@/lib/cron-guard';
-import { expireUnpaidWinners } from '@/lib/auction-rpc';
+import { getAdminClient } from '@/lib/server-supabase';
+import { expireUnpaidWinner } from '@/lib/auction-rpc';
+import { getMaxWinnerAttempts } from '@/lib/stripe/server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function POST(request: Request): Promise<Response> {
   return runCronJob(request, 'expire-unpaid-winners', async () => {
-    const expired = await expireUnpaidWinners();
+    // The job discovers its own work from the database — the request body is never read.
+    // Expire each slot whose winning bid has passed its payment deadline. Idempotent:
+    // a winner already expired is not expired again.
+    const { data, error } = await getAdminClient()
+      .from('sponsorship_slots')
+      .select('id')
+      .eq('auction_status', 'awaiting_payment');
+    if (error || !data) {
+      return {
+        job: 'expire-unpaid-winners',
+        ran: true,
+        counts: { winners_expired: 0 },
+        note: 'No winners were past their payment deadline.',
+      };
+    }
+
+    const maxAttempts = getMaxWinnerAttempts();
+    let expired = 0;
+    for (const slot of data) {
+      try {
+        await expireUnpaidWinner(slot.id as string, maxAttempts);
+        expired += 1;
+      } catch {
+        // Already expired or terminal — safe to skip.
+      }
+    }
 
     return {
       job: 'expire-unpaid-winners',

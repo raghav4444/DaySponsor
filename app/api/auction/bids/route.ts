@@ -22,6 +22,14 @@ import { parseMajorUnitsToMinor } from '@/lib/money';
 export async function POST(request: Request) {
   if (!isPost(request)) return errorResponse('Method not allowed.', 405, 'method_not_allowed');
 
+  // Require the raw bearer token before we even touch the body — every downstream call
+  // (placeBid + requireBrand) reads it, so fail fast if it's absent.
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return errorResponse('Sign in to continue.', 401, 'unauthenticated');
+  }
+  const token = authHeader.replace('Bearer ', '');
+
   const { profile, error } = await requireBrand(request);
   if (error) return error;
 
@@ -50,18 +58,18 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await placeBid({ slotId, brandProfileId: profile.id, amount });
+    const result = await placeBid(token, { slotId, amount });
 
-    if (result.error_code) {
-      const message = PLACE_BID_ERROR_MESSAGES[result.error_code] ?? 'Your bid could not be placed.';
+    if (result.error) {
+      const message = PLACE_BID_ERROR_MESSAGES[result.error] ?? 'Your bid could not be placed.';
       const conflict =
-        result.error_code === 'bid_too_low' || result.error_code === 'auction_ended';
+        result.error === 'BID_TOO_LOW' || result.error === 'AUCTION_ENDED';
       // A conflict returns the live current bid so the client can update its display
       // instead of silently rejecting the same number again.
       return NextResponse.json(
         {
           error: message,
-          code: result.error_code,
+          code: result.error,
           currentHighestBid: result.current_highest_bid,
           auctionEndsAt: result.auction_ends_at,
         },

@@ -568,7 +568,7 @@ function DayRow({ day, slots }: { day: DayWithSlots; slots: SlotWithAuction[] })
 
   const openAuctions = slots.filter((s) => s.auction_status === 'open');
   const closedAuctions = slots.filter((s) =>
-    ['closed', 'awaiting_payment', 'sold', 'payment_pending'].includes(s.auction_status ?? ''),
+    ['closed', 'awaiting_payment', 'paid', 'completed', 'cancelled'].includes(s.auction_status ?? ''),
   );
   const highestOpen = openAuctions.reduce(
     (max, s) => Math.max(max, Number(s.current_highest_bid ?? 0)),
@@ -636,7 +636,6 @@ function SlotAuctionLine({ slot }: { slot: SlotWithAuction }) {
   const currency = slot.currency ?? 'eur';
   const starting = Number(slot.starting_price ?? 0);
   const highest = Number(slot.current_highest_bid ?? 0);
-  const bids = Number(slot.bid_count ?? 0);
   const closed = slot.auction_status !== 'open';
 
   return (
@@ -651,9 +650,6 @@ function SlotAuctionLine({ slot }: { slot: SlotWithAuction }) {
         </span>
         <span>
           Highest <span className="font-semibold text-foreground">{formatMinorUnits(highest, currency)}</span>
-        </span>
-        <span>
-          {bids} bid{bids === 1 ? '' : 's'}
         </span>
         {slot.auction_ends_at && !closed && (
           <span>

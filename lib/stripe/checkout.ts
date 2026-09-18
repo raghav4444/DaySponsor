@@ -99,8 +99,9 @@ export async function resolveCheckout(params: {
     reject('not_bid_owner', 'This bid belongs to another brand.', 403);
   }
 
-  // 2. The bid must be the winner — not merely a participant.
-  if (bid!.status !== 'winning' && bid!.status !== 'payment_pending') {
+  // 2. The bid must be the winner — not merely a participant. The DB vocabulary is
+  // `payment_pending` (selected winner awaiting payment) and `paid` (settled winner).
+  if (bid!.status !== 'payment_pending' && bid!.status !== 'paid') {
     reject('not_winning', 'This bid is not the winning bid.', 409);
   }
 
@@ -109,8 +110,9 @@ export async function resolveCheckout(params: {
   if (!slot) reject('slot_unavailable', 'This slot is no longer available.', 404);
   if (!slot.is_available) reject('slot_taken', 'This slot is no longer available.', 409);
 
-  // 4. The auction must be closed (a winner exists) — an open auction cannot be paid for.
-  if (slot.auction_status === 'open') {
+  // 4. The auction must have settled past `open`/`draft` — an open auction cannot be
+  // paid for. `awaiting_payment` / `paid` are the payable states.
+  if (slot.auction_status === 'open' || slot.auction_status === 'draft') {
     reject('auction_still_open', 'This auction has not closed yet.', 409);
   }
 
@@ -120,9 +122,13 @@ export async function resolveCheckout(params: {
     reject('invalid_amount', 'The bid amount is not valid.', 402);
   }
 
-  // 6. The creator must have a Connect account able to receive transfers.
-  const creatorProfileId = bid!.creator_id;
-  const stripeAccountId = await loadStripeAccountId(creatorProfileId);
+  // 6. The creator must have a Connect account able to receive transfers. `bids`
+  // carries no creator reference — the creator owns the day the slot belongs to.
+  const creatorProfileId = await loadCreatorProfileIdForSlot(slot!.id);
+  if (!creatorProfileId) {
+    reject('creator_not_found', 'The creator for this slot could not be found.', 404);
+  }
+  const stripeAccountId = await loadStripeAccountId(creatorProfileId!);
   if (!stripeAccountId) {
     reject(
       'creator_not_connected',
@@ -292,11 +298,28 @@ async function loadSponsorshipSlotId(sponsorshipId: string): Promise<string | nu
   return data.slot_id as string;
 }
 
+/** Resolves the creator profile id that owns the day a slot belongs to. */
+async function loadCreatorProfileIdForSlot(slotId: string): Promise<string | null> {
+  const { data: slot, error: slotError } = await getAdminClient()
+    .from('sponsorship_slots')
+    .select('day_id')
+    .eq('id', slotId)
+    .maybeSingle();
+  if (slotError || !slot) return null;
+  const { data: day, error: dayError } = await getAdminClient()
+    .from('days')
+    .select('creator_id')
+    .eq('id', (slot as { day_id: string }).day_id)
+    .maybeSingle();
+  if (dayError || !day) return null;
+  return (day as { creator_id: string }).creator_id;
+}
+
 async function loadStripeAccountId(creatorProfileId: string): Promise<string | null> {
   const { data, error } = await getAdminClient()
     .from('creator_profiles')
     .select('stripe_account_id')
-    .eq('id', creatorProfileId)
+    .eq('profile_id', creatorProfileId)
     .maybeSingle();
   if (error || !data) return null;
   return (data.stripe_account_id as string | null) ?? null;
@@ -323,7 +346,9 @@ async function createPendingSponsorship(params: {
       currency: params.currency,
       platform_fee: params.platformFee,
       creator_amount: params.creatorAmount,
-      status: 'pending',
+      status: 'payment_pending',
+      payment_status: 'pending',
+      payout_status: 'pending',
     })
     .select('id')
     .single();

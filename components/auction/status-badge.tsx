@@ -21,34 +21,31 @@ import type {
 type StatusStyle = { label: string; color: string };
 
 const AUCTION_STATUS: Record<AuctionStatus, StatusStyle> = {
-  not_listed: { label: 'Not listed', color: 'bg-secondary text-muted-foreground' },
+  draft: { label: 'Draft', color: 'bg-secondary text-muted-foreground' },
   open: { label: 'Open', color: 'bg-accent/10 text-accent' },
-  closing: { label: 'Closing', color: 'bg-amber-500/10 text-amber-600' },
+  closed: { label: 'Closed', color: 'bg-secondary text-muted-foreground' },
   awaiting_payment: { label: 'Awaiting payment', color: 'bg-amber-500/10 text-amber-600' },
-  payment_pending: { label: 'Payment pending', color: 'bg-amber-500/10 text-amber-600' },
-  sold: { label: 'Sold', color: 'bg-accent/10 text-accent' },
-  expired: { label: 'Expired', color: 'bg-secondary text-muted-foreground' },
+  paid: { label: 'Paid', color: 'bg-accent/10 text-accent' },
+  completed: { label: 'Completed', color: 'bg-accent/10 text-accent' },
   cancelled: { label: 'Cancelled', color: 'bg-destructive/10 text-destructive' },
 };
 
 const BID_STATUS: Record<BidStatus, StatusStyle> = {
-  pending: { label: 'Pending', color: 'bg-secondary text-muted-foreground' },
-  winning: { label: 'Winning', color: 'bg-accent/10 text-accent' },
+  active: { label: 'Active', color: 'bg-accent/10 text-accent' },
   outbid: { label: 'Outbid', color: 'bg-amber-500/10 text-amber-600' },
-  won: { label: 'Won', color: 'bg-accent/10 text-accent' },
-  lost: { label: 'Lost', color: 'bg-secondary text-muted-foreground' },
+  winner: { label: 'Winner', color: 'bg-accent/10 text-accent' },
   payment_pending: { label: 'Payment required', color: 'bg-amber-500/10 text-amber-600' },
-  payment_failed: { label: 'Payment failed', color: 'bg-destructive/10 text-destructive' },
-  expired: { label: 'Expired', color: 'bg-secondary text-muted-foreground' },
+  paid: { label: 'Paid', color: 'bg-accent/10 text-accent' },
+  cancelled: { label: 'Cancelled', color: 'bg-secondary text-muted-foreground' },
+  failed: { label: 'Failed', color: 'bg-destructive/10 text-destructive' },
 };
 
 const PAYOUT_STATUS: Record<PayoutStatus, StatusStyle> = {
-  none: { label: 'No payout', color: 'bg-secondary text-muted-foreground' },
   pending: { label: 'Payout pending', color: 'bg-amber-500/10 text-amber-600' },
+  eligible: { label: 'Eligible', color: 'bg-accent/10 text-accent' },
   released: { label: 'Payout released', color: 'bg-accent/10 text-accent' },
   failed: { label: 'Payout failed', color: 'bg-destructive/10 text-destructive' },
-  reversed: { label: 'Payout reversed', color: 'bg-destructive/10 text-destructive' },
-  on_hold: { label: 'Payout on hold', color: 'bg-amber-500/10 text-amber-600' },
+  cancelled: { label: 'Payout cancelled', color: 'bg-secondary text-muted-foreground' },
 };
 
 const REFUND_STATUS: Record<RefundStatus, StatusStyle> = {

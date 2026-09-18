@@ -1,454 +1,352 @@
-# DaySponsor — Auction & Payment Implementation Contract
+# DaySponsor — Auction & Database Integration Contract
 
-> **Status: DRAFT (Engineer B)**
->
-> This document is the **proposed** contract for the auction, bidding, and payment
-> subsystems. It is written by Engineer B (Stripe / UI) because the auction schema did
-> not exist on `main` when this work started. Engineer A owns the migrations and RPCs
-> and **must review this before implementing it**.
->
-> Engineer B will code against this document. If Engineer A changes a name, shape, or
-> RPC signature, Engineer B will update the temporary application types in
-> `lib/auction-types.ts` (which exist *only* because generated database types are not
-> yet available) and the calling code.
->
-> **Rule that must never be violated:** the application never trusts the browser for a
-> financial amount, a currency, a winner, or a payout. The database is authoritative.
+**Audience:** Engineer B (Stripe integration + frontend).
+**Owner of this document:** Engineer A (database, auction engine, RLS).
+**Companion document:** `docs/database-auction-implementation.md` (findings, rationale, units caveat).
+
+This is the binding contract. Any change to a name, type, status value, or RPC signature below
+must be coordinated.
 
 ---
 
-## 1. Design constraints
+## 1. Table and column names (exact)
 
-These are hard constraints that any implementation must satisfy:
+### `bids` — NEW
 
-1. **Integer minor units.** All money is stored as a Postgres `bigint`/`integer` in the
-   smallest currency unit (e.g. `450` = €4.50). No `numeric`/`float` money columns, no
-   client-side rounding. Currency is fixed per slot and is **not** accepted from the
-   client.
-2. **Server-authoritative state.** Bids, winner selection, payment status, and payout
-   release are set by RPCs or by service-role server writes — never by a browser
-   Supabase client using an RLS-permitted `update`.
-3. **Atomic bidding.** A bid must be a single server-side atomic operation that
-   re-checks the current highest bid and the auction deadline inside the transaction.
-   Optimistic UI updates are display-only.
-4. **Payment is confirmed only by a verified Stripe webhook**, never by the browser
-   success/cancel redirect.
-5. **Payout is a separate, later operation** from payment. Funds land on the platform
-   first (platform charge, or charge with `transfer_group`), and the creator transfer is
-   released only after fulfillment conditions are met.
-6. **Payout amount is independent of review rating.** A 1-star review and a 5-star
-   review must produce an identical `creator_amount`.
-7. **Idempotency everywhere.** Financial creation calls carry a stable Stripe
-   idempotency key; webhook events are de-duplicated by event id; transfers are
-   de-duplicated by a database uniqueness constraint.
+| column | type | nullable | default | notes |
+|---|---|---|---|---|
+| `id` | uuid | NO | `gen_random_uuid()` | PK |
+| `slot_id` | uuid | NO | — | FK `sponsorship_slots(id) ON DELETE CASCADE` |
+| `brand_id` | uuid | NO | — | FK `profiles(id)` (profile with `role='brand'`) |
+| `amount` | bigint | NO | — | **minor units**, `CHECK (amount > 0)` |
+| `currency` | text | NO | `'usd'` | derived from slot at insert; client value ignored |
+| `status` | text | NO | `'active'` | see §3 |
+| `created_at` | timestamptz | NO | `now()` | tie-breaker #2 |
+| `updated_at` | timestamptz | NO | `now()` | |
+
+Indexes: `bids(slot_id, status, amount DESC NULLS LAST, created_at, id)` (deterministic
+winner ordering + the "one selected leader" assertions),
+`bids(slot_id, status)` (status filter), `bids(brand_id)`.
+
+**Public leader view:** `public.auction_leader(slot_id, amount, currency, created_at, status)`
+— the row `sponsorship_slots.current_highest_bid_id` points at, projected **without**
+`brand_id` (RLS is row-level, so the row itself can never be exposed to rivals). Owner-run
+view, `SELECT` granted to `authenticated`: the live-bid UI's public ask. Not in the
+generated types (views aren't emitted) — select it explicitly.
+
+### `sponsorship_slots` — EXTENDED
+
+Existing unchanged: `id`, `day_id`, `tier`, `price` (**major units, legacy**), `position`,
+`description`, `is_available`, `created_at`.
+
+| NEW column | type | nullable | default | notes |
+|---|---|---|---|---|
+| `starting_price` | bigint | YES | — | minor units, `> 0` |
+| `currency` | text | NO | `'usd'` | `usd` / `eur` / `gbp` |
+| `current_highest_bid` | bigint | YES | — | minor units |
+| `current_highest_bid_id` | uuid | YES | — | FK → `bids(id)` |
+| `auction_status` | text | NO | `'draft'` | see §3 |
+| `auction_ends_at` | timestamptz | YES | — | must be future when `open` |
+| `closed_at` | timestamptz | YES | — | set by close |
+| `winning_bid_id` | uuid | YES | — | FK → `bids(id)`, **UNIQUE** |
+| `payment_due_at` | timestamptz | YES | — | set by close |
+| `winner_attempt_count` | integer | NO | `0` | `>= 0` |
+
+### `sponsorships` — EXTENDED
+
+Existing retained and widened: `amount`, `platform_fee`, `creator_amount` **integer → bigint**.
+Existing retained as-is: `stripe_checkout_session_id`, `stripe_payment_intent_id`.
+
+| NEW column | type | nullable | default | notes |
+|---|---|---|---|---|
+| `slot_id` | uuid | NO | — | **already existed** (reaffirmed; FK `sponsorship_slots(id)`) |
+| `winning_bid_id` | uuid | YES | — | FK → `bids(id)`, **UNIQUE** |
+| `currency` | text | NO | `'usd'` | mirror of slot currency |
+| `payment_status` | text | NO | `'pending'` | `pending` / `paid` / `failed` / `refunded` |
+| `payment_due_at` | timestamptz | YES | — | mirror of slot deadline |
+| `paid_at` | timestamptz | YES | — | webhook writes |
+| `refund_amount` | bigint | YES | — | minor units; `>= 0` |
+| `refunded_at` | timestamptz | YES | — | webhook writes |
+| `payout_status` | text | NO | `'pending'` | `pending` / `eligible` / `released` / `failed` |
+| `payout_eligible_at` | timestamptz | YES | — | set when `day_completed` |
+| `payout_released_at` | timestamptz | YES | — | service only |
+| `stripe_charge_id` | text | YES | — | webhook writes |
+| `stripe_refund_id` | text | YES | — | webhook writes |
+| `stripe_transfer_id` | text | YES | — | service only; **unique where not null** |
+
+### `stripe_webhook_events` — NEW (idempotency)
+
+| column | type | nullable | default | notes |
+|---|---|---|---|---|
+| `id` | uuid | NO | `gen_random_uuid()` | PK |
+| `stripe_event_id` | text | NO | — | **UNIQUE** — the idempotency key |
+| `event_type` | text | NO | — | e.g. `payment_intent.succeeded` |
+| `resource_id` | text | YES | — | PI / charge / refund / transfer id |
+| `payload` | jsonb | NO | — | raw event body |
+| `processed_at` | timestamptz | YES | — | null until handled |
+| `error_message` | text | YES | — | last failure, if any |
+| `created_at` | timestamptz | NO | `now()` | |
+
+RLS: **no client policy at all** — only the service role can touch it.
+
+### `reviews` — EXTENDED
+
+| NEW column | type | nullable | default | notes |
+|---|---|---|---|---|
+| `brand_id` | uuid | YES | — | **derived server-side**; present so the UI can show "review of brand X" without a join, and so a losing bidder can never be the reviewed brand. NULL for legacy rows. FK → `profiles(id)` |
+| `is_featured` | boolean | NO | `false` | UI display flag only |
+
+`sponsorship_id` becomes `UNIQUE` (one review per sponsorship).
 
 ---
 
-## 2. Naming conventions
+## 2. RPC signatures and return shapes
 
-- Table names: `snake_case`, plural.
-- Status/type columns: `text` with a `CHECK` constraint, never a bare enum (matches the
-  existing schema style in
-  `supabase/migrations/20260903215330_create_daysponsor_schema.sql`).
-- Money columns: `<thing>_amount` in minor units, plus a sibling `<thing>_currency`
-  where a row can cross currencies.
-- Timestamps: `timestamptz`, `DEFAULT now()`. Deadline/payout columns end in `_at`.
-- Stripe identifiers: `stripe_<object>_id` (matches existing
-  `stripe_payment_intent_id`, `stripe_checkout_session_id`).
+All RPCs resolve identity internally. All are `SECURITY DEFINER` where they must act across RLS,
+each with `SET search_path = public, public` and a grant only on `EXECUTE`.
+
+### `place_bid(p_slot_id uuid, p_amount bigint)` → `jsonb`
+
+Authenticated brand. Never accepts a currency — the slot's currency is authoritative.
+
+```jsonc
+{
+  "ok": true,
+  "error": null,
+  "bid_id": "9b1f…",
+  "slot_id": "…",
+  "amount": 30500,
+  "currency": "eur",
+  "status": "active",
+  "is_leading": true,
+  "current_highest_bid": 30500,
+  "current_highest_bid_id": "9b1f…",
+  "auction_status": "open",
+  "auction_ends_at": "2026-09-20T12:00:00+00:00"
+}
+```
+
+```jsonc
+{ "ok": false, "error": "BID_TOO_LOW", "bid_id": null, "amount": 30000,
+  "currency": "eur", "current_highest_bid": 30500, "auction_status": "open" }
+```
+
+Deterministic error codes: `UNAUTHENTICATED`, `BRAND_PROFILE_REQUIRED`, `SLOT_NOT_FOUND`,
+`AUCTION_NOT_OPEN`, `AUCTION_ENDED`, `INVALID_AMOUNT`, `BELOW_STARTING_PRICE`, `BID_TOO_LOW`,
+`SELF_BID_FORBIDDEN`, `AUCTION_FULL`.
+
+### `open_auction(p_slot_id uuid, p_starting_price bigint, p_currency text, p_ends_at timestamptz)` → `jsonb`
+
+Slot's creator only. Error codes: `UNAUTHENTICATED`, `NOT_SLOT_OWNER`, `SLOT_NOT_FOUND`,
+`INVALID_STARTING_PRICE`, `UNSUPPORTED_CURRENCY`, `INVALID_END_TIME`, `ALREADY_OPEN`.
+
+### `close_expired_auction(p_slot_id uuid)` → `jsonb` — service role only
+
+```jsonc
+{
+  "ok": true,
+  "slot_id": "…",
+  "auction_status": "awaiting_payment",
+  "closed_at": "2026-09-20T12:00:01+00:00",
+  "winning_bid_id": "…",
+  "sponsorship_id": "…",
+  "sponsorship": { "id": "…", "amount": 30500, "platform_fee": 3050,
+                   "creator_amount": 27450, "currency": "eur",
+                   "payment_status": "pending", "payment_due_at": "2026-09-23T12:00:01+00:00" },
+  "attempts": 1
+}
+```
+
+No-bid close: `auction_status` becomes `closed`, `winning_bid_id` / `sponsorship_id` are `null`.
+Calling again returns the **same** payload with `"attempts": 1` (idempotent — the re-call does
+not duplicate the sponsorship or change state).
+
+### `expire_unpaid_winner(p_slot_id uuid, p_max_attempts integer)` → `jsonb` — service role only
+
+```jsonc
+{ "ok": true, "slot_id": "…", "auction_status": "awaiting_payment", "attempts": 2,
+  "previous_winner_bid_id": "…", "previous_status": "failed",
+  "next_bid_id": "…", "next_amount": 28900, "sponsorship_id": "…",
+  "payment_due_at": "2026-09-26T12:00:01+00:00", "cancelled": false }
+```
+
+Terminal: `"auction_status": "cancelled"`, `"cancelled": true`, `"next_bid_id": null`,
+`"sponsorship_id": null` when `attempts >= p_max_attempts` and no eligible bidder remains.
+
+### `mark_sponsorship_paid(p_sponsorship_id uuid, p_payment_intent_id text, p_charge_id text)` → `jsonb`
+Service role (Stripe webhook). Idempotent. Sets `payment_status='paid'`, `status='paid'`,
+`paid_at`, the Stripe ids; advances the **slot** to `paid`; marks the winning bid `paid`.
+Refuses if already refunded or cancelled.
+
+### `record_refund(p_sponsorship_id uuid, p_refund_id text, p_amount bigint)` → `jsonb`
+Service role. Sets `payment_status='refunded'`, `status='refunded'`, `refund_amount`,
+`refunded_at`, `stripe_refund_id`; slot → `cancelled`; winning bid → `cancelled`.
+
+### `release_payout(p_sponsorship_id uuid, p_transfer_id text)` → `jsonb`
+Service role. Requires `payout_status = 'eligible'`. Sets `payout_status='released'`,
+`payout_released_at`, `stripe_transfer_id` (unique).
+
+### `advance_fulfillment(p_sponsorship_id uuid, p_to_status text)` → `jsonb`
+Authenticated brand **or** creator, identity from `auth.uid()`. Allowed transitions, with *who*
+may drive each:
+
+| from | to | driver |
+|---|---|---|
+| `paid` | `product_shipped` | brand |
+| `product_shipped` | `product_received` | creator |
+| `product_received` | `day_completed` | creator |
+| `day_completed` | `review_pending` | creator |
+| `review_pending` | `completed` | `submit_review` RPC (not this one) |
+
+Error codes: `UNAUTHENTICATED`, `SPONSORSHIP_NOT_FOUND`, `NOT_A_PARTY`,
+`INVALID_TRANSITION`, `NOT_ELIGIBLE_FOR_REVIEW`.
+
+### `submit_review(p_sponsorship_id uuid, p_rating integer, p_title text, p_content text,
+p_pros text[], p_cons text[], p_would_recommend boolean, p_video_url text,
+p_video_platform text)` → `jsonb`
+
+Authenticated creator only. Derives brand from the winning bid — **never** accepts a brand id.
+Requires `status >= 'review_pending'` (equivalently `day_completed` reached) and
+`payment_status = 'paid'`. `rating` must be an integer 1–5; 1-star is valid and does not affect
+payout. Inserts, or updates an existing review, then sets `sponsorships.status = 'completed'`.
+Returns `{ ok, review_id, sponsorship_id, status }`.
 
 ---
 
-## 3. Schema additions
+## 3. Status value sets
 
-All of the following are **requests**. Engineer A owns the final SQL. See
-`docs/database-change-requests.md` for the consolidated, prioritized list.
-
-### 3.1 `sponsorship_slots` — auction fields
-
-The existing `sponsorship_slots` table is fixed-price (`price integer NOT NULL`) with a
-boolean `is_available`. Auction behaviour needs more state than a boolean can carry.
-
-```sql
-ALTER TABLE sponsorship_slots
-  -- Money. starting_price replaces price as the auction reserve / opening bid.
-  ADD COLUMN IF NOT EXISTS starting_price bigint NOT NULL DEFAULT 0,
-  -- Absolute auction close time (UTC). NULL while the slot is not yet listed for auction.
-  ADD COLUMN IF NOT EXISTS auction_ends_at timestamptz,
-  -- Auction lifecycle, distinct from the parent day's status.
-  ADD COLUMN IF NOT EXISTS auction_status text NOT NULL DEFAULT 'not_listed'
-    CHECK (auction_status IN (
-      'not_listed',      -- created, not open for bidding
-      'open',            -- accepting bids
-      'closing',         -- deadline reached, winner being resolved (short window)
-      'awaiting_payment',-- a winning bid is selected and unpaid
-      'payment_pending', -- checkout session created for the winning bid
-      'sold',            -- paid
-      'expired',         -- no valid bids and the deadline passed
-      'cancelled'
-    )),
-  -- Denormalized, maintained ONLY by RPC, for fast display. Never written by the client.
-  ADD COLUMN IF NOT EXISTS current_highest_bid bigint NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS current_highest_bidder_id uuid REFERENCES profiles(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS bid_count integer NOT NULL DEFAULT 0,
-  -- How many times the slot has moved to a fallback winner.
-  ADD COLUMN IF NOT EXISTS winner_attempts integer NOT NULL DEFAULT 0;
 ```
+auction_status:  draft open closed awaiting_payment paid completed cancelled
 
-Backfill: `starting_price := price`, then `price` is **dropped** (or kept as a nullable
-deprecated column for one release) so that no code path can read a stale fixed price.
+bid status:      active outbid winner payment_pending paid cancelled failed
 
-`sponsorship_slots.is_available` is retained for compatibility but is **no longer the
-source of truth** for auction state; `auction_status` is.
+sponsorship status:  payment_pending paid product_shipped product_received
+                     day_completed review_pending completed cancelled refunded
+                     (+ legacy 'pending', an alias of payment_pending)
 
-### 3.2 `auction_bids`
-
-Every bid, kept forever for audit and dispute resolution. **Row-level security: the
-browser may only read aggregate/own rows** (see §6).
-
-```sql
-CREATE TABLE IF NOT EXISTS auction_bids (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  slot_id uuid NOT NULL REFERENCES sponsorship_slots(id) ON DELETE CASCADE,
-  brand_id uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  -- The creator who owns the slot at bid time, denormalized for fast creator queries.
-  creator_id uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  amount bigint NOT NULL CHECK (amount > 0),
-  currency text NOT NULL DEFAULT 'eur',
-  -- 'pending' (active in the running auction)
-  -- 'winning'  (currently the selected winning bid)
-  -- 'outbid'   (superseded by a higher bid)
-  -- 'won'      (won AND paid)
-  -- 'lost'     (auction closed and this bid did not win)
-  -- 'payment_pending' (checkout session created for this bid)
-  -- 'payment_failed'  (checkout expired or payment failed)
-  -- 'expired'  (was winning, payment deadline lapsed without payment)
-  status text NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending','winning','outbid','won','lost','payment_pending','payment_failed','expired')),
-  stripe_checkout_session_id text,
-  payment_deadline_at timestamptz,
-  placed_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (slot_id, brand_id, amount, placed_at)
-);
-
-CREATE INDEX IF NOT EXISTS idx_auction_bids_slot_id ON auction_bids(slot_id);
-CREATE INDEX IF NOT EXISTS idx_auction_bids_slot_status ON auction_bids(slot_id, status);
-CREATE INDEX IF NOT EXISTS idx_auction_bids_brand_status ON auction_bids(brand_id, status);
-CREATE INDEX IF NOT EXISTS idx_auction_bids_creator_status ON auction_bids(creator_id, status);
-```
-
-**Only one bid per slot may hold a "paying" status.** Enforced by the partial unique
-index in §3.6.
-
-### 3.3 `sponsorships` — payment & payout fields
-
-The existing table already has `amount`, `platform_fee`, `creator_amount`, and Stripe id
-columns. Extend it:
-
-```sql
-ALTER TABLE sponsorships
-  -- The bid this sponsorship was created from. NULL only for legacy fixed-price rows.
-  ADD COLUMN IF NOT EXISTS winning_bid_id uuid REFERENCES auction_bids(id) ON DELETE SET NULL,
-  -- Currency, fixed at auction-listing time.
-  ADD COLUMN IF NOT EXISTS currency text NOT NULL DEFAULT 'eur',
-  -- Payment deadline for the winning bidder (drives the expirer job).
-  ADD COLUMN IF NOT EXISTS payment_deadline_at timestamptz,
-  -- When the webhook confirmed payment. updated_at is not sufficient.
-  ADD COLUMN IF NOT EXISTS paid_at timestamptz,
-  -- Payout / transfer state. NULL until a transfer is attempted.
-  ADD COLUMN IF NOT EXISTS stripe_transfer_id text,
-  ADD COLUMN IF NOT EXISTS payout_status text NOT NULL DEFAULT 'none'
-    CHECK (payout_status IN ('none','pending','released','failed','reversed','on_hold')),
-  ADD COLUMN IF NOT EXISTS payout_released_at timestamptz,
-  -- Refund state.
-  ADD COLUMN IF NOT EXISTS stripe_refund_id text,
-  ADD COLUMN IF NOT EXISTS refund_status text NOT NULL DEFAULT 'none'
-    CHECK (refund_status IN ('none','pending','succeeded','failed','canceled')),
-  -- Admin-controlled hold that blocks payout release regardless of other conditions.
-  ADD COLUMN IF NOT EXISTS payout_hold boolean NOT NULL DEFAULT false,
-  ADD COLUMN IF NOT EXISTS payout_hold_reason text;
-```
-
-Add a CHECK that the money always balances: `amount = platform_fee + creator_amount`.
-
-### 3.4 `webhook_events`
-
-Stripe event idempotency + audit trail. Written by the service role only; the browser
-never touches it.
-
-```sql
-CREATE TABLE IF NOT EXISTS webhook_events (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  stripe_event_id text NOT NULL UNIQUE,   -- evt_...  <-- the idempotency key
-  stripe_account_id text,                 -- acct_... for Connect events
-  event_type text NOT NULL,               -- e.g. checkout.session.completed
-  api_version text,
-  -- 'pending'  : received, processing started
-  -- 'processed': the handler finished successfully
-  -- 'failed'   : handler threw; safe to retry
-  status text NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending','processing','processed','failed')),
-  attempts integer NOT NULL DEFAULT 0,
-  last_error text,
-  processed_at timestamptz,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_webhook_events_status ON webhook_events(status, created_at);
-```
-
-Idempotency contract: the webhook handler inserts a row keyed on `stripe_event_id`. If
-the insert conflicts **and the existing row is `processed`**, return 2xx immediately
-without re-executing side effects. If it conflicts and the row is `pending`/`failed`,
-re-run the handler.
-
-### 3.5 `notifications`
-
-The current in-app notification mechanism is shadcn toast + sonner, which is ephemeral.
-Persistent, reviewable notifications need a table. The **toast remains the delivery
-mechanism**; this table is the record.
-
-```sql
-CREATE TABLE IF NOT EXISTS notifications (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  recipient_id uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  type text NOT NULL,          -- see §7 for the allowed set
-  title text NOT NULL,
-  body text,
-  -- Optional deep link, e.g. /dashboard/brand?tab=payment
-  href text,
-  -- The thing that caused it, for de-duplication and for "mark all read".
-  related_type text,
-  related_id uuid,
-  read_at timestamptz,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (recipient_id, type, related_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_notifications_recipient_read
-  ON notifications(recipient_id, read_at, created_at DESC);
-```
-
-### 3.6 Required partial unique indexes
-
-These are the load-bearing correctness constraints. They are what makes the system
-safe to run without a global lock:
-
-```sql
--- Exactly one winning/paying bid per slot.
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_slot_paying_bid
-  ON auction_bids(slot_id)
-  WHERE status IN ('winning', 'payment_pending');
-
--- Exactly one open unpaid sponsorship per slot. Prevents double-selling a slot.
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_slot_unpaid_sponsorship
-  ON sponsorships(slot_id)
-  WHERE status IN ('pending', 'paid')
-    AND refund_status IN ('none', 'pending');
-
--- At most one successful transfer per sponsorship. Prevents double payout.
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_sponsorship_released_transfer
-  ON sponsorships(id)
-  WHERE payout_status = 'released';
-
--- At most one open refund per sponsorship.
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_sponsorship_open_refund
-  ON sponsorships(id)
-  WHERE refund_status IN ('pending');
+payment_status:  pending paid failed refunded
+payout_status:   pending eligible released failed
 ```
 
 ---
 
-## 4. RPCs (owned by Engineer A)
-
-Engineer B calls these. Signatures are proposals; names must be agreed. All money is
-minor units; **no RPC accepts a currency or a final amount from the caller unless
-explicitly stated**.
-
-### 4.1 `place_bid`
-
-Atomic bid placement. This is the atomic bidding function the spec requires.
+## 4. Financial rounding rule
 
 ```text
-place_bid(
-  p_slot_id       uuid,
-  p_brand_id      uuid,   -- validated server-side against the caller's profile
-  p_amount        bigint  -- minor units; MUST be > current_highest_bid + min_increment
-) RETURNS TABLE (
-  bid_id            uuid,
-  status            text,   -- 'winning' | 'outbid'
-  current_highest_bid bigint,
-  previous_bidder_id uuid,  -- for the outbid notification; NULL if none
-  auction_ends_at   timestamptz,
-  error_code        text    -- NULL on success
-)
+platform_fee   = floor((amount * 10 + 50) / 100)
+creator_amount = amount - platform_fee
 ```
 
-Error codes: `auction_not_open`, `auction_ended`, `bid_too_low`, `own_slot`,
-`not_brand_role`, `slot_unavailable`, `deadline_passed`.
+All three are `bigint` minor units. Computed **in SQL**, inside the close transaction, never in
+JavaScript. `amount = winning bid amount`, so the sponsorship total equals the winning bid to the
+cent.
 
-Inside one transaction the RPC must: `SELECT ... FOR UPDATE` the slot, re-check
-`auction_status = 'open'` and `now() < auction_ends_at`, compare `p_amount` against
-`current_highest_bid`, insert the bid, demote the previous high bidder to `outbid`, set
-the new bid to `winning`, update the denormalized slot counters, and commit. On any
-failure the whole thing rolls back.
+Examples: 29900 → fee 2990 / creator 26910. 14900 → 1490 / 13410. 105 → 11 / 94.
 
-If the auction deadline has passed the RPC **must** return `auction_ended` rather than
-silently accepting — the client uses this to trigger a refetch, and the closing job is
-the only thing that transitions `open → closing/awaiting_payment`.
-
-### 4.2 Auction lifecycle RPCs (called by cron, not by the browser)
-
-```text
-close_expired_auctions(p_batch_size int DEFAULT 100)
-  → finds slots with auction_status='open' AND auction_ends_at <= now()
-    transitions them toward awaiting_payment; selects the highest valid bid.
-    Returns the number of slots processed.
-
-expire_unpaid_winners(p_deadline_hours int DEFAULT 24, p_batch_size int DEFAULT 100)
-  → slots with a winning bid whose payment_deadline_at <= now()
-    marks the bid 'expired', bumps sponsorship_slots.winner_attempts,
-    returns count advanced.
-
-advance_to_fallback_winner(p_slot_id uuid, p_max_attempts int DEFAULT 3)
-  → moves the slot to the next-highest valid bid, if any. Returns the new
-    winning bid id or NULL.
-
-reconcile_payment_state(p_batch_size int DEFAULT 100)
-  → for sponsorships stuck in 'pending'/'payment_pending' whose checkout
-    session is known, asks Stripe (via a server callback, see §4.5) for the
-    authoritative session/payment-intent status and corrects local state.
-```
-
-### 4.3 Payment state RPCs (called only by the verified webhook handler)
-
-```text
-mark_sponsorship_paid(
-  p_sponsorship_id     uuid,
-  p_checkout_session_id text,
-  p_payment_intent_id   text,
-  p_amount              bigint,   -- minor units, compared against sponsorships.amount
-  p_currency            text      -- compared against sponsorships.currency
-) RETURNS TABLE (ok boolean, error_code text)
-```
-
-This is the **only** place that flips a sponsorship to `paid`. It must verify
-`p_amount = sponsorships.amount AND p_currency = sponsorships.currency` inside the
-transaction and refuse otherwise (`amount_mismatch`). On success it also marks the
-winning bid `won`, the slot `sold`, sets `paid_at`, and records both Stripe ids.
-
-```text
-mark_payment_failed(p_sponsorship_id uuid, p_reason text)
-mark_checkout_expired(p_sponsorship_id uuid)
-mark_refund_state(p_sponsorship_id uuid, p_refund_id text, p_status text, p_amount bigint)
-record_transfer(
-  p_sponsorship_id uuid, p_transfer_id text, p_amount bigint, p_currency text
-) RETURNS TABLE (ok boolean, error_code text)   -- guarded by uniq index §3.6
-record_transfer_failure(p_sponsorship_id uuid, p_transfer_id text, p_code text, p_message text)
-```
-
-### 4.4 Read-only dashboard RPCs
-
-```text
-get_brand_bids(p_brand_id uuid)         → active/winning/outbid/ended rows
-get_creator_auctions(p_creator_id uuid) → slot + auction + winning-bid summary
-get_admin_auction_overview()            → auctions, bids, payments, transfers, refunds
-get_platform_revenue()                  → fees collected, transferred, pending
-```
-
-### 4.5 The Stripe-call boundary
-
-RPCs **must not** make outbound HTTPS calls to Stripe (they run as SQL). Any
-reconciliation that needs Stripe goes through this contract instead:
-
-```text
--- Engineer B's server code calls this to hand a resolution back to the DB:
-queue_stripe_reconcile(p_sponsorship_id uuid, p_kind text)
-  → inserts into a tiny stripe_reconcile_queue table (Engineer B polls or cron drains it)
-```
-
-If Engineer A prefers, `reconcile_payment_state` may instead be implemented as a pure
-**read** RPC returning the rows that need a Stripe check, with Engineer B applying the
-correction through `mark_sponsorship_paid` / `mark_payment_failed`. Either is acceptable;
-pick one and record it here.
+**Units warning.** `sponsorship_slots.price` and the legacy checkout in
+`app/checkout/[slot]/page.tsx` are in **major units** and compute the fee with
+`Math.round(price * 0.1)` in JS. Auction-created sponsorships are **minor units** with the SQL
+formula. Do not read `price` as minor units, and do not mix the two on one sponsorship row.
 
 ---
 
-## 5. Configuration values
+## 5. Field ownership
 
-```text
-AUCTION_PAYMENT_DEADLINE_HOURS   default 24   (env override, see .env.example)
-AUCTION_MAX_WINNER_ATTEMPTS      default 3
-AUCTION_MIN_BID_INCREMENT        default 50 minor units (€0.50)
-PLATFORM_FEE_BPS                 default 1000 (10%)
-```
+### Service role / Stripe webhooks ONLY (RLS denies every client write)
 
-The platform fee is computed **server-side** from `PLATFORM_FEE_BPS` at checkout time
-and stored; the stored `platform_fee` and `creator_amount` are what the payout uses, so
-a later fee change never retroactively alters a deal.
+`sponsorships.paid_at`, `refund_amount`, `refunded_at`, `payout_status`,
+`payout_eligible_at`, `payout_released_at`, `stripe_charge_id`, `stripe_refund_id`,
+`stripe_transfer_id`, `stripe_payment_intent_id`, `stripe_checkout_session_id`;
+`sponsorship_slots.closed_at`, `winning_bid_id`, `payment_due_at`, `auction_status` (except the
+creator's own `open_auction` call), `current_highest_bid`, `current_highest_bid_id`,
+`winner_attempt_count`;
+all of `stripe_webhook_events`.
 
----
+### Derived — must never be written by any client, including the service role writing it directly
 
-## 6. RLS policy requirements
+`sponsorships.brand_id` (pinned to the winning bid by a `CHECK` constraint),
+`sponsorships.amount` / `platform_fee` / `creator_amount` (computed by close/fallback RPCs),
+`reviews.brand_id` (derived from the winning bid).
 
-The browser Supabase client must be able to:
+### Client-writable (through RPCs, not direct table writes)
 
-- **Read** `sponsorship_slots` (all listed slots, with auction fields).
-- **Read own** `auction_bids` rows (`brand_id = auth.uid()`-equivalent profile).
-- **Read** `current_highest_bid`, `bid_count`, `auction_ends_at`, `auction_status` from
-  `sponsorship_slots` — this is public auction state.
-- **Not read** other brands' bid rows. The "do not expose losing brand identities" rule
-  means the client-facing queries must expose only aggregate counts plus the caller's
-  own bids. Where the client needs "am I winning", expose that as a derived boolean on
-  the caller's own row, not as a list of other bidders.
-- **Not read** `webhook_events` at all (service role only).
-- **Read own** `notifications`; update `read_at` on own rows only.
-- **Not write** `auction_bids.status`, `sponsorship_slots.current_highest_bid`,
-  `bid_count`, `auction_status`, or any `payout_*` / `refund_*` column. Those columns
-  are written exclusively by service-role server code and RPCs.
+`place_bid` writes `bids.amount`; `submit_review` writes the review content fields;
+`advance_fulfillment` advances `sponsorships.status` along the allowed edges only.
 
-The client places bids by **calling the `place_bid` RPC** (or Engineer B's authenticated
-server wrapper around it), never by inserting into `auction_bids` directly.
+### UI may read
 
----
+All of `bids` (its own brand's rows plus `amount`/`currency`/`created_at`/`status` of the
+leader — see RLS note below), `sponsorship_slots` including auction columns, `sponsorships`
+(own brand or own creator rows), `reviews` (public), `stripe_webhook_events` never.
 
-## 7. Notification types
-
-The persistent notification table stores these `type` values. Toast is the delivery
-mechanism; failure to deliver a toast or notification **must not** roll back a
-successful financial transaction (notifications are fire-and-forget, queued after the
-commit).
-
-```text
-bid_accepted        outbid           auction_ended
-winner_selected     payment_required payment_expiring
-payment_successful  product_shipped  product_received
-review_pending      review_published payout_released
-refund_completed    fallback_selected
-```
+**RLS note for the live-bid UI:** a rival brand can read `current_highest_bid` and the
+leader's `amount` through the `public.auction_leader` view
+(`slot_id`, `amount`, `currency`, `created_at`, `status` — **no `brand_id` column**), but
+**not** the leader's `brand_id` on the base `bids` table: RLS is row-level, so admitting
+the leader's row would leak its identity. RLS on `bids` admits only a caller's own rows
+(or every row to the slot's creator). `place_bid`'s return payload exposes no other
+brand's private data.
 
 ---
 
-## 8. Currency
+## 6. Fields Stripe webhooks may update
 
-- The platform currency is **EUR**, fixed by configuration (`PLATFORM_CURRENCY`, default
-  `eur`).
-- `currency` columns are set at slot-listing time and are immutable for the slot's life.
-- The client **never** sends a currency. The Checkout Session currency comes from the
-  slot.
-- Amounts are formatted for display using `Intl.NumberFormat` with `style: 'currency'`
-  and the slot's currency, converting minor units by dividing by 100.
+Via the service-role RPCs only, never direct table writes:
+
+| Event → RPC | Columns written |
+|---|---|
+| `payment_intent.succeeded` / `charge.succeeded` → `mark_sponsorship_paid` | `sponsorships.payment_status`, `status`, `paid_at`, `stripe_payment_intent_id`, `stripe_charge_id`; `bids.status='paid'`; `sponsorship_slots.auction_status='paid'` |
+| `charge.refunded` / `refund.*` → `record_refund` | `sponsorships.payment_status`, `status`, `refund_amount`, `refunded_at`, `stripe_refund_id`; `bids.status='cancelled'`; slot `auction_status='cancelled'` |
+| `transfer.created` / `transfer.paid` → `release_payout` | `sponsorships.payout_status`, `payout_released_at`, `stripe_transfer_id` |
+| *(all events)* → `stripe_webhook_events` | append row if `stripe_event_id` unseen, then set `processed_at` / `error_message` |
+
+**Idempotency contract for Engineer B:** insert the `stripe_event_id` row first; if that insert
+fails on the unique constraint, the event was already handled — return 200 and do not replay the
+side effects. The RPCs are independently idempotent as a second layer.
 
 ---
 
-## 9. Open questions for Engineer A
+## 7. Clients must not be able to do these — all are enforced
 
-1. Confirm the `place_bid` return shape (§4.1) — specifically whether you prefer a
-   composite return type or a JSONB `result` column. Engineer B will match whatever you
-   choose.
-2. Confirm §4.5: does `reconcile_payment_state` make the Stripe call (rejected — SQL
-   can't do outbound HTTPS cleanly) or does it return rows for Engineer B to reconcile?
-3. Should `auction_bids` keep a `currency` column, or is slot-level `currency` enough?
-4. Confirm whether `sponsorship_slots.price` is dropped or kept nullable-deprecated.
-5. The `notifications` table is new. If you already have a notification design, that one
-   wins and Engineer B will drop §3.5.
+Mark self winner · change winning bid · close an auction · change current highest bid · mark
+payment successful · change amount · change fee · change creator amount · set Stripe IDs ·
+trigger payout · mark payout successful · reassign review sponsorship or brand · insert / update
+/ delete `bids` rows directly · review a losing brand · submit a review before the sponsorship
+is paid and fulfilled.
+
+Direct DML on `bids` is denied to every client role: `place_bid` is the only write path, and it
+is a `SECURITY DEFINER` function that takes no trust from RLS.
+
+---
+
+## 8. TypeScript types
+
+Generated/updated definitions live in **`lib/supabase.ts`** (hand-maintyped; no Supabase CLI, no
+`types/database.d.ts` exists in this repo). Engineer B imports
+`Bid`, `AuctionSlot`, `AuctionSponsorship`, `StripeWebhookEvent`, `ReviewRow` and the
+`place_bid` result type from there. RPC calls use `supabase.rpc('place_bid', {…})`.
+
+---
+
+## 9. Remaining database limitations (read before integrating)
+
+1. **Major-vs-minor unit split.** `sponsorship_slots.price` is major units (legacy UI); auction
+   fields and auction-created sponsorships are minor units. The migration does **not** backfill
+   `starting_price` from `price`, because doing so would silently create €2.99 starting prices.
+   Engineer B must populate `starting_price` (or call `open_auction`) explicitly per slot.
+2. **No scheduler runs inside Postgres.** `close_expired_auction` and `expire_unpaid_winner` are
+   idempotent operations for an external job (cron / Supabase scheduled function / Edge function)
+   to invoke with the service role. Nothing in the DB calls them on a timer.
+3. **No Stripe call is ever made from a DB transaction.** `mark_sponsorship_paid` etc. only write
+   state; the webhook handler owns all HTTP.
+4. **No `brand_profiles` table.** Brands are `profiles` rows with `role='brand'`; `bids.brand_id`
+   and `sponsorships.brand_id` reference `profiles(id)`.
+5. **Currency whitelist** is `usd`, `eur`, `gbp`. Add a migration to extend it — do not relax the
+   `CHECK` ad hoc.
+6. **`winner_attempt_count` has no built-in cap.** Pass `p_max_attempts` (default 3) from the
+   scheduler; the RPC stops and cancels the auction when it is reached.
+7. **Existing rows.** Pre-auction sponsorships keep `status='pending'` and null auction fields;
+   they remain readable by the current dashboards. `reviews.brand_id` is null for legacy rows.
+8. **`payout_eligible_at` is set on `day_completed`** by `advance_fulfillment`, but nothing in the
+   DB transfers money — `release_payout` must be driven by the Stripe transfer flow, which is
+   Engineer B's.

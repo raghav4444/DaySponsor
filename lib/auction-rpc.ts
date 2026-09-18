@@ -1,142 +1,211 @@
 /**
  * Auction RPC dispatch layer.
  *
- * ️ PARTIALLY TEMPORARY. See `docs/auction-implementation-contract.md`.
+ * Thin seam between the application and Engineer A's database functions
+ * (`supabase/migrations/20260916*`, documented in
+ * `docs/auction-implementation-contract.md`).
  *
- * This is the seam between the application and Engineer A's database functions. While
- * those functions do not exist yet, calls fall back to the in-memory implementation in
- * `lib/auction-rpc-stubs.ts`. When the migration merges, delete the stubs and keep only
- * the real `.rpc(...)` calls — the rest of the application never has to change.
- *
- * Detection is by PostgREST's "function not found" code (`PGRST202`): against a migrated
- * database the real function wins; against an old one we degrade to the stub rather than
- * 500ing the whole auction UI.
+ * Auth model (migration 20260916000008):
+ *  - `place_bid`, `open_auction`, `advance_fulfillment`, `submit_review` run as the
+ *    *authenticated caller* — the RPC derives the brand/creator from `auth.uid()`.
+ *    Call them through the caller's token (`createAuthenticatedSupabaseClient`).
+ *  - `close_expired_auction`, `expire_unpaid_winner`, `mark_sponsorship_paid`,
+ *    `record_refund`, `release_payout` are service-role-only. Call them through the
+ *    admin client from a guarded server context (cron secret / webhook signature).
  */
 
+import { createAuthenticatedSupabaseClient } from '@/lib/supabase';
 import { getAdminClient } from '@/lib/server-supabase';
 import type {
   AuctionBid,
   PlaceBidResult,
 } from '@/lib/auction-types';
-import {
-  stubPlaceBid,
-  stubMarkSponsorshipPaid,
-  stubCloseExpiredAuctions,
-  stubExpireUnpaidWinners,
-} from '@/lib/auction-rpc-stubs';
-
-/** PostgREST error code for "function not found". */
-const RPC_NOT_FOUND = 'PGRST202';
 
 /**
- * True when a Supabase error means "the RPC does not exist yet".
- * Used only to decide whether to fall back to the dev stub.
+ * Places a bid via `place_bid(p_slot_id, p_amount)`.
+ *
+ * The RPC derives the brand from `auth.uid()` — the caller never supplies a brand id
+ * and never supplies a currency. Must be called with the brand's token.
  */
-function isRpcMissing(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const code = (error as { code?: string }).code;
-  if (code === RPC_NOT_FOUND) return true;
-  // Some hosts surface the hint instead of the code.
-  const message = String((error as { message?: string }).message ?? '');
-  return /Could not find the function|does not exist/i.test(message);
+export async function placeBid(
+  token: string,
+  params: {
+    slotId: string;
+    amount: number;
+  },
+): Promise<PlaceBidResult> {
+  const { data, error } = await createAuthenticatedSupabaseClient(token).rpc('place_bid', {
+    p_slot_id: params.slotId,
+    p_amount: params.amount,
+  });
+
+  if (error) throw error;
+  return data as unknown as PlaceBidResult;
 }
 
 /**
- * Places a bid by calling the `place_bid` RPC (contract §4.1).
- *
- * The client supplies only the slot id, the brand profile id, and the amount in minor
- * units. Currency, status, and all winner bookkeeping are decided server-side.
+ * Opens a draft auction (`open_auction`). Only the Day's creator may call it.
+ * Must be called with the creator's token.
  */
-export async function placeBid(params: {
-  slotId: string;
-  brandProfileId: string;
-  amount: number;
-}): Promise<PlaceBidResult> {
-  try {
-    const { data, error } = await getAdminClient().rpc('place_bid', {
-      p_slot_id: params.slotId,
-      p_brand_id: params.brandProfileId,
-      p_amount: params.amount,
-    });
+export async function openAuction(
+  token: string,
+  params: {
+    slotId: string;
+    startingPrice: number;
+    currency: string;
+    endsAt: string;
+  },
+) {
+  const { data, error } = await createAuthenticatedSupabaseClient(token).rpc('open_auction', {
+    p_slot_id: params.slotId,
+    p_starting_price: params.startingPrice,
+    p_currency: params.currency,
+    p_ends_at: params.endsAt,
+  });
 
-    if (error) throw error;
-    return data as PlaceBidResult;
-  } catch (error) {
-    if (!isRpcMissing(error)) throw error;
-
-    return stubPlaceBid({
-      slotKey: params.slotId,
-      brandId: params.brandProfileId,
-      amount: params.amount,
-    });
-  }
+  if (error) throw error;
+  return data as unknown as Record<string, unknown>;
 }
 
 /**
- * Marks a sponsorship paid (contract §4.3).
- *
- * Called only from the webhook handler after Stripe confirms the payment. The amount and
- * currency are read from the database by the caller and passed back in as an assertion —
- * the RPC re-checks them — so a mismatch is caught rather than silently recorded.
+ * Advances fulfillment (`advance_fulfillment`). Caller must be the brand or the
+ * creator, and only the entitled party per edge. Called with the caller's token.
+ */
+export async function advanceFulfillment(
+  token: string,
+  params: { sponsorshipId: string; toStatus: string },
+) {
+  const { data, error } = await createAuthenticatedSupabaseClient(token).rpc(
+    'advance_fulfillment',
+    {
+      p_sponsorship_id: params.sponsorshipId,
+      p_to_status: params.toStatus,
+    },
+  );
+
+  if (error) throw error;
+  return data as unknown as Record<string, unknown>;
+}
+
+/**
+ * Submits a creator review (`submit_review`). The reviewed brand is derived from the
+ * winning bid inside the RPC. Called with the creator's token.
+ */
+export async function submitReview(
+  token: string,
+  params: {
+    sponsorshipId: string;
+    rating: number;
+    title: string | null;
+    content: string | null;
+    pros: string[];
+    cons: string[];
+    wouldRecommend: boolean | null;
+    videoUrl: string | null;
+    videoPlatform: string | null;
+  },
+) {
+  const { data, error } = await createAuthenticatedSupabaseClient(token).rpc('submit_review', {
+    p_sponsorship_id: params.sponsorshipId,
+    p_rating: params.rating,
+    p_title: params.title,
+    p_content: params.content,
+    p_pros: params.pros,
+    p_cons: params.cons,
+    p_would_recommend: params.wouldRecommend,
+    p_video_url: params.videoUrl,
+    p_video_platform: params.videoPlatform,
+  });
+
+  if (error) throw error;
+  return data as unknown as Record<string, unknown>;
+}
+
+// ─── Service-role-only RPCs (scheduler / webhook) ─────────────────────────────
+
+/**
+ * Settles one ended auction (`close_expired_auction(p_slot_id)`).
+ * Service role only — call from a cron-guarded server context.
+ */
+export async function closeExpiredAuction(slotId: string) {
+  const { data, error } = await getAdminClient().rpc('close_expired_auction', {
+    p_slot_id: slotId,
+  });
+
+  if (error) throw error;
+  return data as unknown as Record<string, unknown>;
+}
+
+/**
+ * Falls back one unpaid winner (`expire_unpaid_winner(p_slot_id, p_max_attempts)`).
+ * Service role only — call from a cron-guarded server context.
+ */
+export async function expireUnpaidWinner(slotId: string, maxAttempts: number) {
+  const { data, error } = await getAdminClient().rpc('expire_unpaid_winner', {
+    p_slot_id: slotId,
+    p_max_attempts: maxAttempts,
+  });
+
+  if (error) throw error;
+  return data as unknown as Record<string, unknown>;
+}
+
+/**
+ * Marks a sponsorship paid (`mark_sponsorship_paid`). Called only from the webhook
+ * handler after Stripe confirms the payment. Service role only.
  */
 export async function markSponsorshipPaid(params: {
   sponsorshipId: string;
+  paymentIntentId: string | null;
+  chargeId: string | null;
+}): Promise<{ ok: boolean; error: string | null } & Record<string, unknown>> {
+  const { data, error } = await getAdminClient().rpc('mark_sponsorship_paid', {
+    p_sponsorship_id: params.sponsorshipId,
+    p_payment_intent_id: params.paymentIntentId,
+    p_charge_id: params.chargeId,
+  });
+
+  if (error) throw error;
+  return (data ?? { ok: false, error: 'no_result' }) as {
+    ok: boolean;
+    error: string | null;
+  } & Record<string, unknown>;
+}
+
+/**
+ * Records a refund (`record_refund`). Called only from the webhook handler.
+ * Service role only.
+ */
+export async function recordRefund(params: {
+  sponsorshipId: string;
+  refundId: string;
   amount: number;
-  currency: string;
-  paymentIntentId: string;
-}): Promise<{ ok: boolean; error_code: string | null }> {
-  try {
-    const { data, error } = await getAdminClient().rpc('mark_sponsorship_paid', {
-      p_sponsorship_id: params.sponsorshipId,
-      p_amount: params.amount,
-      p_currency: params.currency,
-      p_payment_intent_id: params.paymentIntentId,
-    });
+}) {
+  const { data, error } = await getAdminClient().rpc('record_refund', {
+    p_sponsorship_id: params.sponsorshipId,
+    p_refund_id: params.refundId,
+    p_amount: params.amount,
+  });
 
-    if (error) throw error;
-    return (data ?? { ok: false, error_code: 'no_result' }) as {
-      ok: boolean;
-      error_code: string | null;
-    };
-  } catch (error) {
-    if (!isRpcMissing(error)) throw error;
-
-    return stubMarkSponsorshipPaid({
-      sponsorshipId: params.sponsorshipId,
-      amount: params.amount,
-      currency: params.currency,
-    });
-  }
+  if (error) throw error;
+  return data as unknown as Record<string, unknown>;
 }
 
 /**
- * Closes auctions whose end time has passed (contract §4.2).
- * Returns the number of slots transitioned.
+ * Releases a payout (`release_payout`). Called after the Stripe transfer exists.
+ * Service role only.
  */
-export async function closeExpiredAuctions(): Promise<number> {
-  try {
-    const { data, error } = await getAdminClient().rpc('close_expired_auctions');
-    if (error) throw error;
-    return typeof data === 'number' ? data : 0;
-  } catch (error) {
-    if (!isRpcMissing(error)) throw error;
-    return stubCloseExpiredAuctions();
-  }
-}
+export async function releasePayoutRpc(params: {
+  sponsorshipId: string;
+  transferId: string;
+}) {
+  const { data, error } = await getAdminClient().rpc('release_payout', {
+    p_sponsorship_id: params.sponsorshipId,
+    p_transfer_id: params.transferId,
+  });
 
-/**
- * Expires winning bids whose payment deadline passed without payment, advancing to the
- * next bidder (contract §4.2). Returns the number of winners expired.
- */
-export async function expireUnpaidWinners(): Promise<number> {
-  try {
-    const { data, error } = await getAdminClient().rpc('expire_unpaid_winners');
-    if (error) throw error;
-    return typeof data === 'number' ? data : 0;
-  } catch (error) {
-    if (!isRpcMissing(error)) throw error;
-    return stubExpireUnpaidWinners();
-  }
+  if (error) throw error;
+  return data as unknown as Record<string, unknown>;
 }
 
 /**
@@ -146,10 +215,11 @@ export async function expireUnpaidWinners(): Promise<number> {
  */
 export async function loadBidsForSlot(slotId: string): Promise<AuctionBid[]> {
   const { data, error } = await getAdminClient()
-    .from('auction_bids')
+    .from('bids')
     .select('*')
     .eq('slot_id', slotId)
-    .order('amount', { ascending: false });
+    .order('amount', { ascending: false })
+    .order('created_at', { ascending: true });
 
   if (error || !data) return [];
   return data as AuctionBid[];

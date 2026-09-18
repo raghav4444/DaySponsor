@@ -92,45 +92,50 @@ export function stubPlaceBid(params: {
   amount: number;
 }): PlaceBidResult {
   const slot = slots.get(params.slotKey);
-  const fail = (errorCode: NonNullable<PlaceBidResult['error_code']>): PlaceBidResult => ({
+  const fail = (errorCode: NonNullable<PlaceBidResult['error']>): PlaceBidResult => ({
+    ok: false,
     bid_id: null,
+    slot_id: slot?.slotKey ?? null,
+    brand_id: null,
+    amount: null,
+    currency: null,
     status: null,
+    is_leading: null,
     current_highest_bid: slot ? slot.currentHighestBid : null,
-    previous_bidder_id: null,
+    current_highest_bid_id: null,
+    auction_status: slot?.auctionStatus ?? null,
     auction_ends_at: slot ? slot.auctionEndsAt : null,
-    error_code: errorCode,
+    previous_leader_outbid: null,
+    error: errorCode,
   });
 
-  if (!slot) return fail('slot_unavailable');
-  if (slot.auctionStatus !== 'open') return fail('auction_not_open');
+  if (!slot) return fail('SLOT_NOT_FOUND');
+  if (slot.auctionStatus !== 'open') return fail('AUCTION_NOT_OPEN');
   if (slot.auctionEndsAt && new Date(slot.auctionEndsAt).getTime() <= Date.now()) {
-    return fail('auction_ended');
+    return fail('AUCTION_ENDED');
   }
 
   // A bid must clear the current high bid (or the starting price) by the increment.
   const floor = slot.currentHighestBidderId
     ? slot.currentHighestBid
     : Math.max(slot.startingPrice - STUB_MIN_INCREMENT, 0);
-  if (params.amount < floor + STUB_MIN_INCREMENT) return fail('bid_too_low');
+  if (params.amount < floor + STUB_MIN_INCREMENT) return fail('BID_TOO_LOW');
 
-  const previousBidderId = slot.currentHighestBidderId;
   const now = new Date().toISOString();
   const bid: AuctionBid = {
     id: `stub-bid-${slot.slotKey}-${slot.bids.length + 1}`,
     slot_id: slot.slotKey,
     brand_id: params.brandId,
-    creator_id: 'stub-creator',
     amount: params.amount,
     currency: 'eur',
-    status: 'winning',
-    stripe_checkout_session_id: null,
-    payment_deadline_at: null,
-    placed_at: now,
+    status: 'winner',
+    created_at: now,
+    updated_at: now,
   };
 
-  // Demote any prior leader — exactly one bid may be `winning` per slot.
+  // Demote any prior leader — exactly one bid may be `winner` per slot.
   for (const existing of slot.bids) {
-    if (existing.status === 'winning') existing.status = 'outbid';
+    if (existing.status === 'winner') existing.status = 'outbid';
   }
   slot.bids.push(bid);
   slot.currentHighestBid = params.amount;
@@ -138,12 +143,20 @@ export function stubPlaceBid(params: {
   slot.bidCount += 1;
 
   return {
+    ok: true,
     bid_id: bid.id,
-    status: 'winning',
+    slot_id: slot.slotKey,
+    brand_id: params.brandId,
+    amount: bid.amount,
+    currency: bid.currency,
+    status: 'winner',
+    is_leading: true,
     current_highest_bid: slot.currentHighestBid,
-    previous_bidder_id: previousBidderId,
+    current_highest_bid_id: bid.id,
+    auction_status: slot.auctionStatus,
     auction_ends_at: slot.auctionEndsAt,
-    error_code: null,
+    previous_leader_outbid: true,
+    error: null,
   };
 }
 
@@ -164,7 +177,8 @@ export function stubRegisterSponsorship(input: {
     slotId: input.slotId,
     amount: input.amount,
     paid: input.paid ?? false,
-    payoutStatus: input.payoutStatus ?? 'none',
+    // The contract default for payout_status is 'pending', not 'none'.
+    payoutStatus: input.payoutStatus ?? 'pending',
     refundStatus: input.refundStatus ?? 'none',
   });
   return sponsorships.get(input.id)!;
@@ -173,15 +187,11 @@ export function stubRegisterSponsorship(input: {
 /** In-memory `mark_sponsorship_paid`, matching contract §4.3 semantics. */
 export async function stubMarkSponsorshipPaid(params: {
   sponsorshipId: string;
-  amount: number;
-  currency: string;
-  paymentIntentId?: string;
-}): Promise<{ ok: boolean; error_code: string | null }> {
+  paymentIntentId: string | null;
+  chargeId: string | null;
+}): Promise<{ ok: boolean; error: string | null } & Record<string, unknown>> {
   const sponsorship = sponsorships.get(params.sponsorshipId);
-  if (!sponsorship) return { ok: false, error_code: 'not_found' };
-  // The amount and currency come from the database, never from the caller's claim.
-  if (params.amount !== sponsorship.amount) return { ok: false, error_code: 'amount_mismatch' };
-  if (params.currency !== 'eur') return { ok: false, error_code: 'currency_mismatch' };
+  if (!sponsorship) return { ok: false, error: 'not_found' };
   sponsorship.paid = true;
 
   // The real RPC writes the transition to `sponsorships`; the stub's Map alone is not
@@ -193,14 +203,15 @@ export async function stubMarkSponsorshipPaid(params: {
       .update({
         status: 'paid',
         paid_at: new Date().toISOString(),
-        stripe_payment_intent_id: params.paymentIntentId ?? null,
+        stripe_payment_intent_id: params.paymentIntentId,
+        stripe_charge_id: params.chargeId,
       })
       .eq('id', params.sponsorshipId);
   } catch {
     /* dev-only stub: the caller's caller reports its own failure */
   }
 
-  return { ok: true, error_code: null };
+  return { ok: true, error: null };
 }
 
 /** Reads current stub state (dev tooling + tests). */
