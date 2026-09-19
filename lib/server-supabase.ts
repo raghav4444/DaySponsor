@@ -20,6 +20,7 @@ export function requireServiceRoleKey(): string {
 }
 
 let adminClient: SupabaseClient | null = null;
+let authClient: SupabaseClient | null = null;
 
 /** Lazily created singleton. Callers that need fresh RLS state should prefer
  *  passing their own URL; this identity is safe for service-role writes. */
@@ -38,9 +39,26 @@ export function getAdminClient(): SupabaseClient {
   return adminClient;
 }
 
+function getAuthClient(): SupabaseClient {
+  if (authClient) return authClient;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new Error('Supabase public environment variables are not set.');
+  }
+  authClient = createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+  return authClient;
+}
+
 /**
  * Resolves the authenticated user's Supabase session server-side from the
- * `Authorization` header, using the admin client (avoids RLS on `auth.users`).
+ * `Authorization` header. Token verification uses the public client; the service-role
+ * client remains reserved for trusted profile and Stripe data access.
  *
  * Used by every protected Stripe route. Returns null for a missing/invalid token.
  */
@@ -49,7 +67,7 @@ export async function authenticateRequest(request: Request) {
   if (!authHeader?.startsWith('Bearer ')) return null;
   const token = authHeader.replace('Bearer ', '');
   try {
-    const { data, error } = await getAdminClient().auth.getUser(token);
+    const { data, error } = await getAuthClient().auth.getUser(token);
     if (error || !data.user) return null;
     return data.user;
   } catch {

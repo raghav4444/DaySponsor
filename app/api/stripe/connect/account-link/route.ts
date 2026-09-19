@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/server-supabase';
 import { requireCreator, handleRouteError, isPost, errorResponse } from '@/lib/stripe/api-helpers';
 import { createAccountLink, createExpressAccount } from '@/lib/stripe/connect';
+import { isStripeConfigured } from '@/lib/stripe/server';
 
 /**
  * POST /api/stripe/connect/account-link
@@ -13,6 +14,13 @@ import { createAccountLink, createExpressAccount } from '@/lib/stripe/connect';
  */
 export async function POST(request: Request) {
   if (!isPost(request)) return errorResponse('Method not allowed.', 405, 'method_not_allowed');
+  if (!isStripeConfigured()) {
+    return errorResponse(
+      'Stripe test mode is not configured. Add STRIPE_SECRET_KEY=sk_test_... to .env and restart the server.',
+      503,
+      'not_configured',
+    );
+  }
 
   const { profile, creatorProfile, error } = await requireCreator(request);
   if (error) return error;

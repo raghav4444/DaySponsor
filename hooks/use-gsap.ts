@@ -3,9 +3,8 @@
 import { useLayoutEffect, useRef } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { useGSAP } from '@gsap/react';
 
-gsap.registerPlugin(ScrollTrigger, useGSAP);
+gsap.registerPlugin(ScrollTrigger);
 
 export { gsap, ScrollTrigger };
 
@@ -71,9 +70,8 @@ export function useGsapSection<T extends HTMLElement = HTMLElement>() {
   };
 
   /**
-   * Run a GSAP setup callback inside a useGSAP context tied to this section's
-   * scope. Tweens are auto-killed when the section unmounts or the callback's
-   * deps change.
+  * Run a GSAP setup callback inside a layout-effect context tied to this
+  * section's scope. Tweens are reverted when the section unmounts or deps change.
    */
   const animate = (
     setup: (
@@ -83,21 +81,18 @@ export function useGsapSection<T extends HTMLElement = HTMLElement>() {
     ) => void | (() => void),
     dependencies: unknown[] = [],
   ) => {
-    useGSAP(
-      () => {
-        const scope = ref.current;
-        if (!scope) return;
-        const mm = gsap.matchMedia();
-        const cleanup = setup(scope, gsap, mm);
-        // matchMedia is not auto-collected by the useGSAP context, so revert it
-        // explicitly when the scope is torn down or deps change.
-        return () => {
-          mm.revert();
-          if (typeof cleanup === 'function') cleanup();
-        };
-      },
-      { scope: ref, dependencies },
-    );
+    useLayoutEffect(() => {
+      const scope = ref.current;
+      if (!scope) return;
+
+      const mm = gsap.matchMedia();
+      const ctx = gsap.context(() => setup(scope, gsap, mm), scope);
+
+      return () => {
+        mm.revert();
+        ctx.revert();
+      };
+    }, dependencies);
   };
 
   // Never leave tweens running against a section that has unmounted.

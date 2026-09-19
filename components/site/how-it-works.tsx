@@ -1,16 +1,15 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useState } from 'react';
 import { Calendar, Package, Star, Search, CreditCard, Send, CheckCircle2, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { gsap, ScrollTrigger, refreshScrollTriggers } from '@/hooks/use-gsap';
-import { Reveal } from '@/components/site/animations/reveal';
+import { gsap, ScrollTrigger, useGsapSection } from '@/hooks/use-gsap';
 
 gsap.registerPlugin(ScrollTrigger);
 
 export function HowItWorks() {
   const [tab, setTab] = useState<'creators' | 'brands'>('creators');
-  const gridRef = useRef<HTMLDivElement>(null);
+  const { ref: gridRef, animate } = useGsapSection<HTMLDivElement>();
 
   const creatorSteps = [
     { icon: Calendar, title: 'Create a day', desc: 'Describe what you\'re doing — coding, traveling, cooking. Set 3 sponsorship slots with your own prices.' },
@@ -28,30 +27,24 @@ export function HowItWorks() {
 
   const steps = tab === 'creators' ? creatorSteps : brandSteps;
 
-  useEffect(() => {
-    const grid = gridRef.current;
-    if (!grid) return;
+  animate((grid, gsapInstance) => {
+    const cards = Array.from(grid.children);
+    gsapInstance.set(cards, { y: 32, opacity: 0, scale: 0.96 });
 
-    const ctx = gsap.context(() => {
-      gsap.from(grid.children, {
-        y: 32,
-        opacity: 0,
-        scale: 0.96,
-        duration: 0.65,
-        ease: 'power3.out',
-        stagger: 0.08,
-        scrollTrigger: {
-          trigger: grid,
-          start: 'top 85%',
-          toggleActions: 'play none none reverse',
-        },
-      });
-    }, grid);
-
-    // A tab switch re-renders the cards; keep triggers accurate afterwards.
-    refreshScrollTriggers();
-
-    return () => ctx.revert();
+    gsapInstance.to(cards, {
+      y: 0,
+      opacity: 1,
+      scale: 1,
+      duration: 0.65,
+      ease: 'power3.out',
+      stagger: 0.08,
+      scrollTrigger: {
+        trigger: grid,
+        start: 'top 85%',
+        toggleActions: 'play none none reverse',
+        onLeaveBack: () => gsapInstance.set(cards, { y: 32, opacity: 0, scale: 0.96 }),
+      },
+    });
   }, [tab]);
 
   return (
