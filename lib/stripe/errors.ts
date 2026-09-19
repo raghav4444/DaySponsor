@@ -105,6 +105,16 @@ export function classifyStripeError(error: unknown): {
     const requestId = stripeError.requestId ?? null;
     const stripeMessage = stripeError.message ?? 'Stripe request failed';
 
+    if (/signed up for Connect/i.test(stripeMessage)) {
+      return {
+        statusCode: 503,
+        code: 'not_configured',
+        message:
+          'Stripe Connect is not activated for this platform. Open Stripe Dashboard > Connect and complete the Connect setup first.',
+        stripeRequestId: requestId,
+      };
+    }
+
     switch (stripeError.type) {
       case 'StripeCardError':
         // Declined card. The decline code is safe to show; the PAN never is.
