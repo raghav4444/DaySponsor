@@ -40,22 +40,38 @@ export function AuthCallback() {
     const error = url.searchParams.get('error');
     const errorDescription = url.searchParams.get('error_description');
     const code = url.searchParams.get('code');
+    const hashParams = new URLSearchParams(url.hash.replace(/^#/, ''));
+    const hashAccessToken = hashParams.get('access_token');
+    const hashRefreshToken = hashParams.get('refresh_token');
 
     // Google reports a provider problem (the project's Google app is not configured yet)
     // as an error parameter rather than a thrown error. Send it to the login page, which
     // explains it instead of showing a blank screen.
-    if (error || !code) {
+    if (error || (!code && !hashAccessToken)) {
       const loginUrl = new URL('/login', url.origin);
       loginUrl.searchParams.set('oauth_error', error ?? 'missing_code');
-      if (errorDescription) loginUrl.searchParams.set('oauth_error_description', errorDescription);
+      if (errorDescription) {
+        loginUrl.searchParams.set('oauth_error_description', errorDescription);
+      } else if (!code) {
+        loginUrl.searchParams.set(
+          'oauth_error_description',
+          'Supabase did not return an authorization code. Check the Google and Supabase redirect URLs.',
+        );
+      }
       router.replace(loginUrl.toString());
       return;
     }
 
     setMessage('Completing your sign in…');
 
-    supabase.auth
-      .exchangeCodeForSession(code)
+    const sessionPromise = code
+      ? supabase.auth.exchangeCodeForSession(code)
+      : supabase.auth.setSession({
+          access_token: hashAccessToken!,
+          refresh_token: hashRefreshToken ?? '',
+        });
+
+    sessionPromise
       .then(({ error: exchangeError, data }) => {
         if (exchangeError || !data.session) {
           const loginUrl = new URL('/login', url.origin);
