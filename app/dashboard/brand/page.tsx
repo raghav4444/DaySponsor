@@ -1,23 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
-import {
-  Target,
-  DollarSign,
-  TrendingUp,
-  Package,
-  ArrowRight,
-  Plus,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  Sparkles,
-  Gavel,
-  CreditCard,
-  AlertCircle,
-  Loader2,
-} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
@@ -35,6 +18,38 @@ import {
   type BrandSponsorshipRow,
 } from '@/lib/brand-dashboard-queries';
 import type { AuctionBid } from '@/lib/auction-types';
+
+type IconProps = React.SVGProps<SVGSVGElement>;
+
+function Link({
+  href,
+  children,
+  ...props
+}: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) {
+  return (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  );
+}
+
+function Icon({ children, ...props }: IconProps & { children?: React.ReactNode }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      {children}
+    </svg>
+  );
+}
+
+const Target = (props: IconProps) => <Icon {...props}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></Icon>;
+const DollarSign = (props: IconProps) => <Icon {...props}><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H7" /></Icon>;
+const Package = (props: IconProps) => <Icon {...props}><path d="m16.5 9.4-9-5.2M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" /><path d="M3.3 7 12 12l8.7-5M12 22V12" /></Icon>;
+const ArrowRight = (props: IconProps) => <Icon {...props}><path d="M5 12h14M13 6l6 6-6 6" /></Icon>;
+const CheckCircle2 = (props: IconProps) => <Icon {...props}><path d="m9 12 2 2 4-4" /><circle cx="12" cy="12" r="9" /></Icon>;
+const Gavel = (props: IconProps) => <Icon {...props}><path d="m14 13 7 7M3 21h18M6 18 18 6M4 8l4-4 4 4-4 4zM12 16l4-4 4 4-4 4z" /></Icon>;
+const CreditCard = (props: IconProps) => <Icon {...props}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18" /></Icon>;
+const AlertCircle = (props: IconProps) => <Icon {...props}><circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" /></Icon>;
+const Loader2 = (props: IconProps) => <Icon {...props}><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" /></Icon>;
 
 type Tab = 'bids' | 'payment' | 'fulfillment' | 'ended';
 
@@ -419,7 +434,7 @@ function BidList({
       {slots.map((slot) => {
         const myBid = myBids.get(slot.id);
         const currency = slot.currency ?? 'eur';
-        const isWinning = myBid?.status === 'winning' || myBid?.status === 'won';
+        const isWinning = myBid?.status === 'winner';
 
         return (
           <div
@@ -439,9 +454,6 @@ function BidList({
                 <div className="text-right">
                   <p className="font-bold text-lg">
                     {formatMinorUnits(Number(slot.current_highest_bid ?? 0), currency)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {Number(slot.bid_count ?? 0)} bid{slot.bid_count === 1 ? '' : 's'}
                   </p>
                 </div>
                 <StatusBadge status={slot.auction_status} kind="auction" />
@@ -503,7 +515,7 @@ function PaymentList({
       {rows.map((row) => {
         const currency = row.currency ?? 'eur';
         const payable = canOfferPayment(row);
-        const deadline = row.payment_deadline_at;
+        const deadline = row.payment_due_at;
         const deadlineStr = deadline
           ? new Date(deadline).toLocaleString('en-US', {
               month: 'short',
@@ -645,9 +657,10 @@ function FailedList({ rows }: { rows: BrandSponsorshipRow[] }) {
                 <StatusBadge status={row.status} kind="sponsorship" />
               </div>
             </div>
-            {row.refund_status && row.refund_status !== 'none' && (
+            {row.payment_status === 'refunded' && (
               <p className="mt-3 text-xs text-muted-foreground">
-                Refund {row.refund_status}. {row.stripe_refund_id ? 'Reference ' + row.stripe_refund_id : ''}
+                Refunded. {row.refund_amount ? formatMinorUnits(row.refund_amount, currency) + ' refunded' : ''}
+                {row.stripe_refund_id ? ` · Ref: ${row.stripe_refund_id}` : ''}
               </p>
             )}
           </div>

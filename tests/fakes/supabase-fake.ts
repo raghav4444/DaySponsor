@@ -41,6 +41,14 @@ export function createFakeSupabaseState(): FakeSupabaseState {
   return { database: {}, rpcCalls: {}, rpcHandlers: {} };
 }
 
+export function installRpcHandler(
+  state: FakeSupabaseState,
+  name: string,
+  handler: (args: unknown) => unknown,
+) {
+  state.rpcHandlers[name] = handler;
+}
+
 /** Set the database to a fresh state, seeded with the given tables. */
 export function seedDatabase(state: FakeSupabaseState, tables: FakeDatabase) {
   state.database = {};
@@ -309,7 +317,7 @@ function statelessCounter(table: string): number {
 
 /**
  * Tables whose uniqueness the fake enforces.
- *  - `webhook_events` has a unique constraint on `event_id` (contract §3.5): without it, a
+ *  - `stripe_webhook_events` has a unique constraint on `stripe_event_id` (contract §3.5): without it, a
  *    replayed delivery would look newly claimed and the idempotency guard would be
  *    untestable.
  *  - `profiles` has a unique `user_id` and `creator_profiles` a unique `profile_id`
@@ -325,8 +333,8 @@ function uniqueConflict(
   row: Row,
 ): { code: string; message: string } | null {
   const uniqueColumn: string | null =
-    table === 'webhook_events'
-      ? 'event_id'
+    table === 'stripe_webhook_events'
+      ? 'stripe_event_id'
       : table === 'profiles'
         ? 'user_id'
         : table === 'creator_profiles'

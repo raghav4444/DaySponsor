@@ -13,14 +13,41 @@
  */
 
 import { runCronJob } from '@/lib/cron-guard';
-import { closeExpiredAuctions } from '@/lib/auction-rpc';
+import { getAdminClient } from '@/lib/server-supabase';
+import { closeExpiredAuction } from '@/lib/auction-rpc';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function POST(request: Request): Promise<Response> {
   return runCronJob(request, 'close-auctions', async () => {
-    const closed = await closeExpiredAuctions();
+    // Closed auctions are identified by the database — the request body is never read.
+    // Close each slot whose auction window has passed. Idempotent: a slot already closed
+    // is not transitioned again.
+    const now = new Date().toISOString();
+    const { data, error } = await getAdminClient()
+      .from('sponsorship_slots')
+      .select('id')
+      .eq('auction_status', 'open')
+      .lte('auction_ends_at', now);
+    if (error || !data) {
+      return {
+        job: 'close-auctions',
+        ran: true,
+        counts: { auctions_closed: 0 },
+        note: 'No auctions were due to close.',
+      };
+    }
+
+    let closed = 0;
+    for (const slot of data) {
+      try {
+        await closeExpiredAuction(slot.id as string);
+        closed += 1;
+      } catch {
+        // Another runner or a prior invocation already closed this slot. Safe to skip.
+      }
+    }
 
     return {
       job: 'close-auctions',

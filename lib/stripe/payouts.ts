@@ -92,20 +92,24 @@ export async function validatePayout(sponsorshipId: string): Promise<PayoutValid
     { precondition: 'sponsorship_paid', ok: true, reason: null },
   ];
 
-  // 3. A refunded sponsorship is never paid out.
-  const refundStatus = (sponsorship.refund_status as string | null) ?? 'none';
-  if (refundStatus === 'completed' || refundStatus === 'pending') {
+  // 3. A refunded sponsorship is never paid out. The DB records the refund via
+  // `record_refund`: `stripe_refund_id` set and `payment_status = 'refunded'`.
+  const stripeRefundId = (sponsorship.stripe_refund_id as string | null) ?? null;
+  const paymentStatus = String(sponsorship.payment_status ?? 'pending');
+  if (stripeRefundId || paymentStatus === 'refunded') {
     return fail(
       'not_refunded',
-      `Refund is '${refundStatus}', so no payout can be released.`,
+      'This sponsorship has been refunded, so no payout can be released.',
       checks,
     );
   }
   checks.push({ precondition: 'not_refunded', ok: true, reason: null });
 
-  // 4. Idempotency guard: an already-released payout is not re-issued.
-  const payoutStatus = (sponsorship.payout_status as string | null) ?? 'none';
-  if (payoutStatus === 'released' || payoutStatus === 'pending') {
+  // 4. Idempotency guard: an already-released payout is not re-issued. The DB
+  // vocabulary is `pending` (awaiting release) / `eligible` / `released` / `failed`:
+  // only `released` blocks a repeat.
+  const payoutStatus = (sponsorship.payout_status as string | null) ?? 'pending';
+  if (payoutStatus === 'released') {
     return fail(
       'not_already_paid_out',
       `Payout is already '${payoutStatus}'.`,
@@ -125,9 +129,10 @@ export async function validatePayout(sponsorshipId: string): Promise<PayoutValid
   }
   checks.push({ precondition: 'not_on_hold', ok: true, reason: null });
 
-  // 6. The creator must still be able to receive transfers.
-  const stripeAccountId = (sponsorship.stripe_transfer_id as string | null)
-    ?? (await loadCreatorAccountId(sponsorship.creator_id as string));
+  // 6. The creator must still be able to receive transfers. The destination is the
+  // creator's Connect account — never `stripe_transfer_id` (the transfer id is a
+  // different thing entirely). `creator_profiles` is keyed by `profile_id`.
+  const stripeAccountId = await loadCreatorAccountId(sponsorship.creator_id as string);
   if (!stripeAccountId) {
     return fail(
       'creator_connected_and_eligible',
@@ -290,20 +295,13 @@ export async function verifyChargeSucceeded(paymentIntentId: string): Promise<bo
 }
 
 /**
- * Records a successful transfer against the sponsorship.
- * Called only after Stripe confirms the transfer object exists.
+ * Records a successful transfer against the sponsorship via the `release_payout` RPC,
+ * which is the only writer of the guarded payout columns. Called only after Stripe
+ * confirms the transfer object exists.
  */
 export async function recordTransfer(sponsorshipId: string, transferId: string) {
-  const { error } = await getAdminClient()
-    .from('sponsorships')
-    .update({
-      stripe_transfer_id: transferId,
-      payout_status: 'released',
-      payout_released_at: new Date().toISOString(),
-    })
-    .eq('id', sponsorshipId);
-
-  if (error) throw error;
+  const { releasePayoutRpc } = await import('@/lib/auction-rpc');
+  await releasePayoutRpc({ sponsorshipId, transferId });
   return true;
 }
 
@@ -313,7 +311,7 @@ async function loadCreatorAccountId(creatorProfileId: string): Promise<string | 
   const { data, error } = await getAdminClient()
     .from('creator_profiles')
     .select('stripe_account_id')
-    .eq('id', creatorProfileId)
+    .eq('profile_id', creatorProfileId)
     .maybeSingle();
   if (error || !data) return null;
   return (data.stripe_account_id as string | null) ?? null;

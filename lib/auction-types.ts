@@ -1,46 +1,61 @@
 /**
- * TEMPORARY application-level auction types.
+ * Application-level auction types.
  *
- * ️ DELETE THIS FILE once Engineer A merges the generated Supabase database types.
+ * These mirror `docs/auction-implementation-contract.md` exactly, which in turn mirrors
+ * the merged Engineer A migrations (`supabase/migrations/20260916*`). The repository has
+ * no generated `Database` types (no Supabase CLI, no `types/database.d.ts`), so these
+ * hand-written aliases are the typed seam the rest of the app imports from.
  *
- * The repository has no generated `Database` types, and the auction schema is not yet
- * migrated (see `docs/database-change-requests.md`). Everything here is hand-written to
- * match `docs/auction-implementation-contract.md` exactly, so that when the migration
- * lands, the only change needed is to swap these type aliases for the generated ones and
- * delete this file.
- *
- * Keeping the surface small and centralized means no other file has to change.
+ * Table names: `bids` (NOT `auction_bids`), `stripe_webhook_events`
+ * (NOT `webhook_events`). Status vocabularies match the CHECK constraints in
+ * `20260916000001` / `20260916000002`.
  */
 
-// ─── Status unions (mirror the CHECK constraints in the contract) ────────────
+// ─── Status unions (mirror the CHECK constraints in the migrations) ────────────
 
 export type AuctionStatus =
-  | 'not_listed'
+  | 'draft'
   | 'open'
-  | 'closing'
+  | 'closed'
   | 'awaiting_payment'
-  | 'payment_pending'
-  | 'sold'
-  | 'expired'
+  | 'paid'
+  | 'completed'
   | 'cancelled';
 
 export type BidStatus =
-  | 'pending'
-  | 'winning'
+  | 'active'
   | 'outbid'
-  | 'won'
-  | 'lost'
+  | 'winner'
   | 'payment_pending'
-  | 'payment_failed'
-  | 'expired';
+  | 'paid'
+  | 'cancelled'
+  | 'failed';
 
+/**
+ * `cancelled` was added by migration `20260916000008` (a refund must never pay out, and
+ * "cancelled" is a different claim from "failed" — nothing was attempted). Keep in sync
+ * with `sponsorships_payout_status_check`.
+ */
 export type PayoutStatus =
-  | 'none'
   | 'pending'
+  | 'eligible'
   | 'released'
   | 'failed'
-  | 'reversed'
-  | 'on_hold';
+  | 'cancelled';
+
+export type SponsorshipStatus =
+  | 'pending'
+  | 'payment_pending'
+  | 'paid'
+  | 'product_shipped'
+  | 'product_received'
+  | 'day_completed'
+  | 'review_pending'
+  | 'completed'
+  | 'cancelled'
+  | 'refunded';
+
+export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
 
 export type RefundStatus = 'none' | 'pending' | 'succeeded' | 'failed' | 'canceled';
 
@@ -65,33 +80,33 @@ export type NotificationType =
 
 // ─── Row shapes ───────────────────────────────────────────────────────────────
 
-/** Auction fields added to `sponsorship_slots` (contract §3.1). */
+/** Auction fields on `sponsorship_slots` (contract §1). */
 export type SlotAuctionFields = {
-  starting_price: number;
+  starting_price: number | null;
   auction_ends_at: string | null;
   auction_status: AuctionStatus;
-  current_highest_bid: number;
-  current_highest_bidder_id: string | null;
-  bid_count: number;
-  winner_attempts: number;
+  current_highest_bid: number | null;
+  current_highest_bid_id: string | null;
+  winning_bid_id: string | null;
+  payment_due_at: string | null;
+  closed_at: string | null;
+  winner_attempt_count: number;
   currency: string;
 };
 
-/** A `auction_bids` row (contract §3.2). */
+/** A `bids` row (contract §1). */
 export type AuctionBid = {
   id: string;
   slot_id: string;
   brand_id: string;
-  creator_id: string;
   amount: number;
   currency: string;
   status: BidStatus;
-  stripe_checkout_session_id: string | null;
-  payment_deadline_at: string | null;
-  placed_at: string;
+  created_at: string;
+  updated_at: string;
 };
 
-/** Payment/payout/refund fields added to `sponsorships` (contract §3.3). */
+/** Payment/payout/refund fields on `sponsorships` (contract §1). */
 export type SponsorshipPaymentFields = {
   winning_bid_id: string | null;
   /** Gross amount charged, integer minor units. */
@@ -101,30 +116,32 @@ export type SponsorshipPaymentFields = {
   /** Creator's share, integer minor units. */
   creator_amount: number;
   currency: string;
-  payment_deadline_at: string | null;
+  status: SponsorshipStatus;
+  payment_status: PaymentStatus;
+  payment_due_at: string | null;
   paid_at: string | null;
+  refund_amount: number | null;
+  refunded_at: string | null;
+  stripe_charge_id: string | null;
   stripe_transfer_id: string | null;
   payout_status: PayoutStatus;
+  payout_eligible_at: string | null;
   payout_released_at: string | null;
   stripe_refund_id: string | null;
-  refund_status: RefundStatus;
   payout_hold: boolean;
   payout_hold_reason: string | null;
 };
 
-/** A `webhook_events` row (contract §3.4). */
+/** A `stripe_webhook_events` row (contract §1). */
 export type WebhookEventRecord = {
   id: string;
   stripe_event_id: string;
-  stripe_account_id: string | null;
   event_type: string;
-  api_version: string | null;
-  status: WebhookEventStatus;
-  attempts: number;
-  last_error: string | null;
+  resource_id: string | null;
+  payload: Record<string, unknown>;
   processed_at: string | null;
+  error_message: string | null;
   created_at: string;
-  updated_at: string;
 };
 
 /** A `notifications` row (contract §3.5). */
@@ -141,31 +158,58 @@ export type NotificationRecord = {
   created_at: string;
 };
 
-// ─── RPC parameter/return shapes (contract §4) ────────────────────────────────
+// ─── RPC result shapes (contract §2) ────────────────────────────────────────────
 
-/** Error codes returned by `place_bid` (contract §4.1). */
+/**
+ * Deterministic `place_bid` error codes. The RPC returns (never raises) these inside
+ * `{ ok: false, error }` so the caller can map them without parsing SQLSTATEs.
+ */
 export type PlaceBidErrorCode =
-  | 'auction_not_open'
-  | 'auction_ended'
-  | 'bid_too_low'
-  | 'own_slot'
-  | 'not_brand_role'
-  | 'slot_unavailable'
-  | 'deadline_passed';
+  | 'UNAUTHENTICATED'
+  | 'BRAND_PROFILE_REQUIRED'
+  | 'SLOT_NOT_FOUND'
+  | 'AUCTION_NOT_OPEN'
+  | 'AUCTION_ENDED'
+  | 'INVALID_AMOUNT'
+  | 'BELOW_STARTING_PRICE'
+  | 'BID_TOO_LOW'
+  | 'SELF_BID_FORBIDDEN'
+  | 'AUCTION_FULL';
 
+/** `open_auction` error codes. */
+export type OpenAuctionErrorCode =
+  | 'UNAUTHENTICATED'
+  | 'INVALID_STARTING_PRICE'
+  | 'INVALID_END_TIME'
+  | 'UNSUPPORTED_CURRENCY'
+  | 'SLOT_NOT_FOUND'
+  | 'NOT_SLOT_OWNER'
+  | 'AUCTION_NOT_DRAFT';
+
+/** Successful `place_bid` payload (contract §2). */
 export type PlaceBidResult = {
+  ok: boolean;
+  error: PlaceBidErrorCode | null;
   bid_id: string | null;
+  slot_id: string | null;
+  brand_id: string | null;
+  amount: number | null;
+  currency: string | null;
   status: BidStatus | null;
+  is_leading: boolean | null;
   current_highest_bid: number | null;
-  previous_bidder_id: string | null;
+  current_highest_bid_id: string | null;
+  auction_status: AuctionStatus | null;
   auction_ends_at: string | null;
-  error_code: PlaceBidErrorCode | null;
+  previous_leader_outbid: boolean | null;
+  // Context extras returned on specific failures.
+  starting_price?: number | null;
 };
 
-/** Return shape of the payment-state RPCs (contract §4.3). */
+/** Return shape of the payment-state RPCs (contract §2). */
 export type PaymentMutationResult = {
   ok: boolean;
-  error_code: string | null;
+  error: string | null;
 };
 
 /**
@@ -175,11 +219,14 @@ export type PaymentMutationResult = {
  * user for a race they could not have avoided.
  */
 export const PLACE_BID_ERROR_MESSAGES: Record<PlaceBidErrorCode, string> = {
-  auction_not_open: 'This auction is not open for bidding yet.',
-  auction_ended: 'This auction has ended.',
-  bid_too_low: 'Your bid is below the current highest bid.',
-  own_slot: 'You cannot bid on your own day.',
-  not_brand_role: 'Only brand accounts can place bids.',
-  slot_unavailable: 'This slot is no longer available.',
-  deadline_passed: 'The bidding deadline for this slot has passed.',
+  UNAUTHENTICATED: 'Sign in to place a bid.',
+  BRAND_PROFILE_REQUIRED: 'Only brand accounts can place bids.',
+  SLOT_NOT_FOUND: 'This slot no longer exists.',
+  AUCTION_NOT_OPEN: 'This auction is not open for bidding yet.',
+  AUCTION_ENDED: 'This auction has ended.',
+  INVALID_AMOUNT: 'Enter a valid bid amount.',
+  BELOW_STARTING_PRICE: 'Your bid is below the starting price.',
+  BID_TOO_LOW: 'Your bid is below the current highest bid.',
+  SELF_BID_FORBIDDEN: 'You cannot bid on your own day.',
+  AUCTION_FULL: 'This slot already has a paying sponsorship.',
 };

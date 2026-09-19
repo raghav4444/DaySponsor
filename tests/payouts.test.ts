@@ -21,6 +21,7 @@ import {
 import {
   createFakeSupabaseState,
   installFakeAdminClient,
+  installRpcHandler,
   seedDatabase,
   type FakeSupabaseState,
 } from './fakes/supabase-fake';
@@ -48,10 +49,9 @@ function seedWithSponsorship(overrides: Record<string, unknown> = {}) {
         currency: 'eur',
         stripe_payment_intent_id: 'pi_existing',
         stripe_transfer_id: null,
-        payout_status: 'none',
+        payout_status: 'pending',
         payout_released_at: null,
         stripe_refund_id: null,
-        refund_status: 'none',
         payout_hold: false,
         payout_hold_reason: null,
         winning_bid_id: 'bid-1',
@@ -77,6 +77,26 @@ beforeEach(() => {
 
   supabaseState = createFakeSupabaseState();
   restoreSupabase = installFakeAdminClient(supabaseState);
+  stripeState.accounts.set(CONNECTED_ACCOUNT_ID, {
+    id: CONNECTED_ACCOUNT_ID,
+    type: 'express',
+    details_submitted: true,
+    payouts_enabled: true,
+    charges_enabled: true,
+    requirements: { currently_due: [], eventually_due: [], past_due: [], disabled_reason: null },
+  });
+  installRpcHandler(supabaseState, 'release_payout', (args) => {
+    const input = args as { p_sponsorship_id: string; p_transfer_id: string };
+    const row = supabaseState.database.sponsorships.find((item) => item.id === input.p_sponsorship_id);
+    if (row) {
+      Object.assign(row, {
+        stripe_transfer_id: input.p_transfer_id,
+        payout_status: 'released',
+        payout_released_at: new Date().toISOString(),
+      });
+    }
+    return { ok: true, error: null };
+  });
 });
 
 afterEach(() => {
@@ -176,7 +196,7 @@ describe('releasePayout: precondition gating', () => {
   });
 
   it('does not pay a sponsorship with a pending refund', async () => {
-    seedWithSponsorship({ refund_status: 'pending' });
+    seedWithSponsorship({ stripe_refund_id: 're_pending' });
 
     const result = await releasePayout('sp-1');
 
@@ -280,6 +300,6 @@ describe('validatePayout', () => {
     await validatePayout('sp-1');
 
     expect(stripeState.transfers).toHaveLength(0);
-    expect(supabaseState.database.sponsorships[0].payout_status).toBe('none');
+    expect(supabaseState.database.sponsorships[0].payout_status).toBe('pending');
   });
 });

@@ -93,7 +93,7 @@ export async function getProfileForUser(userId: string) {
  * A table handle loose enough to chain filters on, for tables the generated database
  * types do not yet describe.
  *
- * Engineer A's auction migration is still pending (see `docs/auction-implementation-contract.md`),
+ * The generated database types do not yet describe the auction columns,
  * so `.from('sponsorship_slots')` resolves to a builder that no longer matches the real
  * columns and TypeScript rejects `.eq(...)` on it. This returns a structurally-typed
  * builder instead; every call site still asserts the resolved row shape it expects, and
