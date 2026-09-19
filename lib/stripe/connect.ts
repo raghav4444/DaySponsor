@@ -102,13 +102,12 @@ export async function createExpressAccount(params: {
       {
         type: 'express',
         email: params.email ?? undefined,
-        country: params.countryCode || undefined,
+        // Let Stripe use the platform's country in local/test mode. A creator's
+        // profile country can differ from the platform country and Stripe rejects
+        // that combination during Express account creation.
         // Internal ids in metadata so a Stripe dashboard row maps back to a profile.
         metadata: {
           creator_profile_id: params.creatorProfileId,
-        },
-        capabilities: {
-          transfers: { requested: true },
         },
       },
       // Stable per creator: a retried request returns the same account, never a second.
@@ -153,7 +152,6 @@ export async function createAccountLink(params: {
         refresh_url: refreshUrl,
         return_url: returnUrl,
         type: 'account_onboarding',
-        collect: 'eventually_due',
       },
       // A short-lived flow token keeps repeated clicks from stacking links.
       {

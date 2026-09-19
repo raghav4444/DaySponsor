@@ -25,7 +25,6 @@ import { supabase, type Day, type Slot } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { formatMinorUnits } from '@/lib/money';
 import { StatusBadge } from '@/components/auction/status-badge';
-import { loadSlotsForDayWithAuction } from '@/lib/auction-queries';
 import type { SlotWithAuction } from '@/lib/auction-queries';
 
 type DayWithSlots = Day & { sponsorship_slots: Slot[] };
@@ -43,6 +42,27 @@ type SponsorshipWithBrand = {
   payment_deadline_at: string | null;
   profiles: { name: string; username: string | null } | null;
 };
+
+async function loadPublicSlotsForDay(dayId: string): Promise<SlotWithAuction[]> {
+  const { data, error } = await supabase
+    .from('sponsorship_slots')
+    .select(
+      'id, day_id, tier, position, description, is_available, created_at, price',
+    )
+    .eq('day_id', dayId)
+    .order('position', { ascending: true });
+
+  if (error || !data) return [];
+  return data.map((row) => ({
+    ...row,
+    starting_price: Number(row.price ?? 0),
+    auction_ends_at: null,
+    auction_status: 'not_listed' as const,
+    current_highest_bid: 0,
+    bid_count: 0,
+    currency: 'eur',
+  })) as unknown as SlotWithAuction[];
+}
 
 /**
  * Creator dashboard.
@@ -74,7 +94,13 @@ export default function CreatorDashboard() {
   const loadData = useCallback(async (profileId: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/dashboard/creator/data?profileId=${profileId}`);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      const response = await fetch(`/api/dashboard/creator/data?profileId=${profileId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!response.ok) throw new Error('Failed to fetch dashboard data');
 
       const payload = (await response.json()) as {
@@ -90,7 +116,7 @@ export default function CreatorDashboard() {
       const byDay = new Map<string, SlotWithAuction[]>();
       await Promise.all(
         payload.days.map(async (day) => {
-          byDay.set(day.id, await loadSlotsForDayWithAuction(day.id));
+          byDay.set(day.id, await loadPublicSlotsForDay(day.id));
         }),
       );
       setAuctionSlots(byDay);
@@ -129,13 +155,21 @@ export default function CreatorDashboard() {
   const startConnect = useCallback(async () => {
     setLinkLoading(true);
     try {
-      const response = await fetch('/api/stripe/connect/account', {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      const response = await fetch('/api/stripe/connect/account-link', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
       });
       const payload = (await response.json()) as { url?: string; error?: string };
 
       if (!response.ok || !payload.url) {
+        console.error('Stripe onboarding failed:', payload.error ?? 'Unknown error');
         toast({
           title: 'Could not start onboarding',
           description: payload.error ?? 'Please try again in a moment.',
@@ -152,9 +186,16 @@ export default function CreatorDashboard() {
   const openDashboard = useCallback(async () => {
     setLinkLoading(true);
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
       const response = await fetch('/api/stripe/connect/dashboard-link', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
       });
       const payload = (await response.json()) as { url?: string; error?: string };
 

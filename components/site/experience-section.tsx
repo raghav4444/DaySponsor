@@ -1,11 +1,41 @@
+'use client';
+
+import { useGsapSection, gsap, ScrollTrigger } from '@/hooks/use-gsap';
 import { Calendar, Clock, Camera, Star, CheckCircle2 } from 'lucide-react';
-import { Reveal } from '@/components/site/animations/reveal';
+
+gsap.registerPlugin(ScrollTrigger);
 
 export function ExperienceSection() {
+  const { ref: sectionRef, animate } = useGsapSection<HTMLElement>();
+
+  animate((section, gsapInstance) => {
+    const heading = section.querySelector('[data-experience-heading]');
+    const cards = section.querySelectorAll('[data-experience-card]');
+
+    if (!heading || cards.length === 0) return;
+
+    const targets = [heading, ...Array.from(cards)];
+    gsapInstance.set(targets, { y: 40, opacity: 0 });
+
+    gsapInstance.to(targets, {
+      y: 0,
+      opacity: 1,
+      duration: 0.8,
+      ease: 'power3.out',
+      stagger: 0.14,
+      scrollTrigger: {
+        trigger: section,
+        start: 'top 80%',
+        toggleActions: 'play none none reverse',
+        onLeaveBack: () => gsapInstance.set(targets, { y: 40, opacity: 0 }),
+      },
+    });
+  });
+
   return (
-    <section className="py-20 bg-secondary/20 border-y border-border/50">
+    <section ref={sectionRef} className="py-20 bg-secondary/20 border-y border-border/50">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <Reveal as="div" variant="fade-up" className="text-center mb-16">
+        <div data-experience-heading className="text-center mb-16">
           <p className="text-sm font-medium text-accent mb-3">The experience</p>
           <h2 className="text-4xl sm:text-5xl font-semibold tracking-tight">
             Before. During.
@@ -15,9 +45,9 @@ export function ExperienceSection() {
             Every sponsorship is a journey — from the moment a brand picks a slot
             to the honest review that follows.
           </p>
-        </Reveal>
+        </div>
 
-        <Reveal as="div" variant="fade-up" stagger={0.14} className="grid md:grid-cols-3 gap-6">
+        <div className="grid md:grid-cols-3 gap-6">
           <PhaseCard
             phase="Before"
             icon={Calendar}
@@ -55,7 +85,7 @@ export function ExperienceSection() {
               'Creator gets paid. Both sides win.',
             ]}
           />
-        </Reveal>
+        </div>
       </div>
     </section>
   );
@@ -78,6 +108,7 @@ function PhaseCard({
 }) {
   return (
     <div
+      data-experience-card
       className={`rounded-2xl border p-6 transition-all hover:shadow-lg ${
         highlighted
           ? 'border-foreground/20 bg-card shadow-md md:-translate-y-2'

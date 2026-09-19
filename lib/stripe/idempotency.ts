@@ -70,7 +70,9 @@ export const IdempotencyKeys = {
 
   /** Stripe Express connected account for a creator. Stable per creator profile. */
   connectAccountForCreator: (creatorProfileId: string) =>
-    idempotencyKey('account', creatorProfileId),
+    // Versioned after changing the account creation payload; Stripe rejects reusing
+    // the old key with different parameters as an idempotency conflict.
+    idempotencyKey('account-v2', creatorProfileId),
 
   /** Single-use Account Link for onboarding. Stable per account + refresh flow. */
   accountLinkForAccount: (accountId: string, flowToken: string) =>

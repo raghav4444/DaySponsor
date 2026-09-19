@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Sparkles, ArrowRight, Check } from 'lucide-react';
+import { Sparkles, ArrowRight, Check, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -29,8 +29,19 @@ export default function SignupPage() {
   const [role, setRole] = useState<'creator' | 'brand'>('creator');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [confirmationCountdown, setConfirmationCountdown] = useState<number | null>(null);
   const router = useRouter();
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (confirmationCountdown === null || confirmationCountdown <= 0) return;
+
+    const timer = window.setTimeout(() => {
+      setConfirmationCountdown((current) => (current === null ? null : current - 1));
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [confirmationCountdown]);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,12 +80,8 @@ export default function SignupPage() {
       // confirmation there is no session yet, so say so instead of routing to a
       // dashboard the user cannot reach.
       if (result.requiresEmailConfirmation || !result.session) {
-        toast({
-          title: 'Check your email',
-          description: 'We sent a confirmation link. Confirm your email to finish signing in.',
-        });
         setLoading(false);
-        router.push('/login?confirmed=awaiting');
+        setConfirmationCountdown(10);
         return;
       }
 
@@ -129,6 +136,47 @@ export default function SignupPage() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-24">
+      {confirmationCountdown !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/30 px-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirmation-title"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 shadow-xl">
+            <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-xl bg-accent/10 text-accent">
+              <Mail className="h-6 w-6" aria-hidden="true" />
+            </div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              One last step
+            </p>
+            <h2 id="confirmation-title" className="text-2xl font-semibold tracking-tight">
+              Check your email
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+              We sent a confirmation link to <span className="font-medium text-foreground">{email}</span>.
+              Verify your email first, then sign in to your DaySponsor account.
+            </p>
+            <div className="mt-6 rounded-xl bg-secondary p-4 text-center">
+              <p className="text-sm text-muted-foreground">
+                {confirmationCountdown > 0
+                  ? `You can continue to login in ${confirmationCountdown}s`
+                  : 'Your account is ready for login.'}
+              </p>
+            </div>
+            <Button
+              type="button"
+              className="mt-6 w-full rounded-full"
+              disabled={confirmationCountdown > 0}
+              onClick={() => router.push('/login?confirmed=awaiting')}
+            >
+              Continue to login
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Link href="/" className="flex items-center gap-2 mb-8 group">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-foreground text-background transition-transform group-hover:scale-105">
           <Sparkles className="h-5 w-5" />
